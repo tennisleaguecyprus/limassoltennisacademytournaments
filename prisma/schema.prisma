@@ -81,3 +81,73 @@ model Match {
   homePlayer     Player      @relation("home_player", fields: [homePlayerId], references: [id], onDelete: Restrict)
   awayPlayer     Player      @relation("away_player", fields: [awayPlayerId], references: [id], onDelete: Restrict)
 }
+
+enum LadderStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum LadderChallengeStatus {
+  PENDING
+  ACCEPTED
+  COMPLETED
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+model Ladder {
+  id                String         @id @default(cuid())
+  name              String
+  description       String?
+  location          String?
+  challengeRange    Int            @default(3)
+  cooldownDays      Int            @default(3)
+  inactivityDays    Int            @default(30)
+  registrationOpen  Boolean        @default(true)
+  maxPlayers        Int?
+  status            LadderStatus   @default(ACTIVE)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+  players           LadderPlayer[]
+  challenges        LadderChallenge[]
+}
+
+model LadderPlayer {
+  id           String   @id @default(cuid())
+  fullName     String
+  countryCode  String?  @db.VarChar(3)
+  position     Int
+  lastMatchAt  DateTime?
+  active       Boolean  @default(true)
+  registeredAt DateTime @default(now())
+  ladderId     String
+  ladder       Ladder   @relation(fields: [ladderId], references: [id], onDelete: Cascade)
+  challengesAsChallenger LadderChallenge[] @relation("ladder_challenger")
+  challengesAsChallenged LadderChallenge[] @relation("ladder_challenged")
+
+  @@index([ladderId, position])
+  @@index([ladderId, active])
+}
+
+model LadderChallenge {
+  id              String                @id @default(cuid())
+  ladderId        String
+  challengerId    String
+  challengedId    String
+  status          LadderChallengeStatus @default(PENDING)
+  scheduledAt     DateTime?
+  court           Int?
+  challengerSets  Int?
+  challengedSets  Int?
+  winnerId        String?
+  completedAt     DateTime?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  ladder          Ladder                @relation(fields: [ladderId], references: [id], onDelete: Cascade)
+  challenger      LadderPlayer          @relation("ladder_challenger", fields: [challengerId], references: [id], onDelete: Restrict)
+  challenged      LadderPlayer          @relation("ladder_challenged", fields: [challengedId], references: [id], onDelete: Restrict)
+
+  @@index([ladderId, status])
+}

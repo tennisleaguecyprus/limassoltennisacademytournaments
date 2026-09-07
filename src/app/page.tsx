@@ -73,6 +73,14 @@ export default async function Home() {
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
             Welcome to Tennis Academy Limassol Tournaments
           </h1>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link
+              href="/ladders"
+              className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            >
+              Ladder Leagues
+            </Link>
+          </div>
         </header>
 
         <section className="mt-6 sm:mt-8">
