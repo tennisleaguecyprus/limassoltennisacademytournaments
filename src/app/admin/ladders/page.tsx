@@ -2,6 +2,7 @@ import Link from "next/link";
 import { revalidatePath } from "next/cache";
 import { LadderStatus } from "@prisma/client";
 
+import DeleteLadderButton from "@/app/components/DeleteLadderButton";
 import { prisma } from "@/lib/prisma";
 
 async function createLadder(formData: FormData) {
@@ -52,6 +53,27 @@ async function createLadder(formData: FormData) {
 
   revalidatePath("/admin/ladders");
   revalidatePath("/ladders");
+  revalidatePath("/");
+}
+
+async function deleteLadder(formData: FormData) {
+  "use server";
+
+  const ladderId = String(formData.get("ladderId") ?? "");
+
+  if (!ladderId) {
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.ladderChallenge.deleteMany({ where: { ladderId } });
+    await tx.ladderPlayer.deleteMany({ where: { ladderId } });
+    await tx.ladder.delete({ where: { id: ladderId } });
+  });
+
+  revalidatePath("/admin/ladders");
+  revalidatePath("/ladders");
+  revalidatePath(`/ladders/${ladderId}`);
   revalidatePath("/");
 }
 
@@ -188,6 +210,7 @@ export default async function AdminLaddersPage() {
                     <th className="px-2 py-2 font-medium">Players</th>
                     <th className="px-2 py-2 font-medium hidden sm:table-cell">Registration</th>
                     <th className="px-2 py-2 font-medium">Manage</th>
+                    <th className="px-2 py-2 font-medium">Delete</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -206,6 +229,13 @@ export default async function AdminLaddersPage() {
                         >
                           Open
                         </Link>
+                      </td>
+                      <td className="px-2 py-2">
+                        <DeleteLadderButton
+                          ladderId={ladder.id}
+                          ladderName={ladder.name}
+                          deleteLadder={deleteLadder}
+                        />
                       </td>
                     </tr>
                   ))}

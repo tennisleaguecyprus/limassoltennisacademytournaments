@@ -6,6 +6,7 @@ import {
   LadderStatus,
 } from "@prisma/client";
 
+import DeleteLadderButton from "@/app/components/DeleteLadderButton";
 import {
   OPEN_CHALLENGE_STATUSES,
   getChallengeValidationError,
@@ -510,6 +511,28 @@ async function runInactivityCheck(formData: FormData) {
   );
 }
 
+async function deleteLadder(formData: FormData) {
+  "use server";
+
+  const ladderId = String(formData.get("ladderId") ?? "");
+
+  if (!ladderId) {
+    return;
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.ladderChallenge.deleteMany({ where: { ladderId } });
+    await tx.ladderPlayer.deleteMany({ where: { ladderId } });
+    await tx.ladder.delete({ where: { id: ladderId } });
+  });
+
+  revalidatePath("/admin/ladders");
+  revalidatePath("/ladders");
+  revalidatePath(`/ladders/${ladderId}`);
+  revalidatePath("/");
+  redirect("/admin/ladders");
+}
+
 export default async function AdminLadderDetailPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const { error, message } = await searchParams;
@@ -563,11 +586,20 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
         </div>
 
         <header className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950 sm:p-8">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{ladder.name}</h1>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-            Challenge up to {ladder.challengeRange} places · Cooldown {ladder.cooldownDays} days ·
-            Inactivity {ladder.inactivityDays} days · Best of 3 sets
-          </p>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{ladder.name}</h1>
+              <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+                Challenge up to {ladder.challengeRange} places · Cooldown {ladder.cooldownDays} days ·
+                Inactivity {ladder.inactivityDays} days · Best of 3 sets
+              </p>
+            </div>
+            <DeleteLadderButton
+              ladderId={ladder.id}
+              ladderName={ladder.name}
+              deleteLadder={deleteLadder}
+            />
+          </div>
         </header>
 
         {error ? (
