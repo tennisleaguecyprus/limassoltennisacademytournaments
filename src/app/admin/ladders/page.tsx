@@ -1,14 +1,21 @@
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { LadderStatus } from "@prisma/client";
 
 import DeleteLadderButton from "@/app/components/DeleteLadderButton";
+import {
+  LADDER_LEVEL_OPTIONS,
+  formatLadderLevelLabel,
+  parseLadderLevel,
+} from "@/lib/ladder";
 import { prisma } from "@/lib/prisma";
 
 async function createLadder(formData: FormData) {
   "use server";
 
   const name = String(formData.get("name") ?? "").trim();
+  const level = parseLadderLevel(String(formData.get("level") ?? ""));
   const description = String(formData.get("description") ?? "").trim();
   const location = String(formData.get("location") ?? "").trim();
   const maxPlayersRaw = String(formData.get("maxPlayers") ?? "").trim();
@@ -16,7 +23,7 @@ async function createLadder(formData: FormData) {
   const cooldownDaysRaw = String(formData.get("cooldownDays") ?? "3").trim();
   const inactivityDaysRaw = String(formData.get("inactivityDays") ?? "30").trim();
 
-  if (!name) {
+  if (!name || !level) {
     return;
   }
 
@@ -37,9 +44,26 @@ async function createLadder(formData: FormData) {
     return;
   }
 
+  const existingActive = await prisma.ladder.findFirst({
+    where: {
+      level,
+      status: { in: [LadderStatus.ACTIVE, LadderStatus.PAUSED] },
+    },
+    select: { id: true, name: true },
+  });
+
+  if (existingActive) {
+    redirect(
+      `/admin/ladders?error=${encodeURIComponent(
+        `An active ${formatLadderLevelLabel(level)} ladder already exists (${existingActive.name}).`,
+      )}`,
+    );
+  }
+
   await prisma.ladder.create({
     data: {
       name,
+      level,
       description: description || null,
       location: location || null,
       maxPlayers,
@@ -54,6 +78,7 @@ async function createLadder(formData: FormData) {
   revalidatePath("/admin/ladders");
   revalidatePath("/ladders");
   revalidatePath("/");
+  redirect("/admin/ladders");
 }
 
 async function deleteLadder(formData: FormData) {
@@ -77,9 +102,15 @@ async function deleteLadder(formData: FormData) {
   revalidatePath("/");
 }
 
-export default async function AdminLaddersPage() {
+type PageProps = {
+  searchParams: Promise<{ error?: string }>;
+};
+
+export default async function AdminLaddersPage({ searchParams }: PageProps) {
+  const { error } = await searchParams;
+
   const ladders = await prisma.ladder.findMany({
-    orderBy: [{ status: "asc" }, { name: "asc" }],
+    orderBy: [{ status: "asc" }, { level: "asc" }, { name: "asc" }],
     include: {
       _count: {
         select: {
@@ -105,22 +136,47 @@ export default async function AdminLaddersPage() {
         <header className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950 sm:p-8">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Ladder Leagues</h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-            Create named leagues (e.g. Beginners, Intermediate, Advanced). Players can register from
-            the public site.
+            Create one ladder per level (Beginner, Beginner/Intermediate, Intermediate, Advanced).
+            Players register with full name, telephone, and level.
           </p>
         </header>
+
+        {error ? (
+          <p className="mt-4 rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200">
+            {error}
+          </p>
+        ) : null}
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:mt-8 sm:p-6">
           <h2 className="text-lg font-medium">Create ladder league</h2>
           <form action={createLadder} className="mt-4 grid gap-4 sm:grid-cols-2">
-            <label className="flex flex-col gap-2 sm:col-span-2">
+            <label className="flex flex-col gap-2">
               <span className="text-sm text-zinc-700 dark:text-zinc-300">League name</span>
               <input
                 name="name"
                 required
                 className="rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-500 dark:border-white/20"
-                placeholder="Beginners"
+                placeholder="Beginners Ladder"
               />
+            </label>
+
+            <label className="flex flex-col gap-2">
+              <span className="text-sm text-zinc-700 dark:text-zinc-300">Level</span>
+              <select
+                name="level"
+                required
+                defaultValue=""
+                className="rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-500 dark:border-white/20"
+              >
+                <option value="" disabled>
+                  Select level
+                </option>
+                {LADDER_LEVEL_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <label className="flex flex-col gap-2 sm:col-span-2">
@@ -206,6 +262,7 @@ export default async function AdminLaddersPage() {
                 <thead className="border-b border-black/10 dark:border-white/10">
                   <tr>
                     <th className="px-2 py-2 font-medium">Name</th>
+                    <th className="px-2 py-2 font-medium">Level</th>
                     <th className="px-2 py-2 font-medium">Status</th>
                     <th className="px-2 py-2 font-medium">Players</th>
                     <th className="px-2 py-2 font-medium hidden sm:table-cell">Registration</th>
@@ -217,6 +274,7 @@ export default async function AdminLaddersPage() {
                   {ladders.map((ladder) => (
                     <tr key={ladder.id} className="border-b border-black/5 dark:border-white/5">
                       <td className="px-2 py-2 font-medium">{ladder.name}</td>
+                      <td className="px-2 py-2">{formatLadderLevelLabel(ladder.level)}</td>
                       <td className="px-2 py-2">{ladder.status}</td>
                       <td className="px-2 py-2">{ladder._count.players}</td>
                       <td className="px-2 py-2 hidden sm:table-cell">

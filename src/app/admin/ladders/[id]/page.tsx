@@ -9,13 +9,28 @@ import {
 import DeleteLadderButton from "@/app/components/DeleteLadderButton";
 import {
   OPEN_CHALLENGE_STATUSES,
+  buildFirstRoundPairs,
+  formatLadderLevelLabel,
+  formatSetScoreLine,
   getChallengeValidationError,
   isInactivePlayer,
-  isValidBestOfThreeSetsScore,
+  isValidPhone,
+  normalizePhone,
   normalizePlayerName,
+  parseBestOfThreeSetScores,
   shouldSwapPositions,
+  sortFirstRoundStandings,
 } from "@/lib/ladder";
 import { prisma } from "@/lib/prisma";
+
+function readOptionalInt(formData: FormData, key: string): number | null {
+  const raw = String(formData.get(key) ?? "").trim();
+  if (!raw) {
+    return null;
+  }
+  const value = Number.parseInt(raw, 10);
+  return Number.isNaN(value) ? null : value;
+}
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -92,18 +107,21 @@ async function addPlayer(formData: FormData) {
 
   const ladderId = String(formData.get("ladderId") ?? "");
   const fullName = String(formData.get("fullName") ?? "").trim().replace(/\s+/g, " ");
-  const countryCode = String(formData.get("countryCode") ?? "")
-    .trim()
-    .toUpperCase()
-    .slice(0, 3);
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
 
-  if (!ladderId || !fullName) {
-    return;
+  if (!ladderId || !fullName || !phone) {
+    redirectWithError(ladderId || "unknown", "Full name and telephone are required.");
+  }
+
+  if (!isValidPhone(phone)) {
+    redirectWithError(ladderId, "Please enter a valid telephone number.");
   }
 
   const ladder = await prisma.ladder.findUnique({
     where: { id: ladderId },
-    include: { players: { where: { active: true }, select: { id: true, fullName: true } } },
+    include: {
+      players: { where: { active: true }, select: { id: true, fullName: true, phone: true } },
+    },
   });
 
   if (!ladder) {
@@ -115,10 +133,12 @@ async function addPlayer(formData: FormData) {
   }
 
   const duplicate = ladder.players.find(
-    (player) => normalizePlayerName(player.fullName) === normalizePlayerName(fullName),
+    (player) =>
+      normalizePlayerName(player.fullName) === normalizePlayerName(fullName) ||
+      normalizePhone(player.phone) === phone,
   );
   if (duplicate) {
-    redirectWithError(ladderId, "A player with this name is already on the ladder.");
+    redirectWithError(ladderId, "A player with this name or telephone is already on the ladder.");
   }
 
   const bottom = await prisma.ladderPlayer.findFirst({
@@ -131,7 +151,7 @@ async function addPlayer(formData: FormData) {
     data: {
       ladderId,
       fullName,
-      countryCode: countryCode || null,
+      phone,
       position: (bottom?.position ?? 0) + 1,
       active: true,
     },
@@ -197,6 +217,34 @@ async function removePlayer(formData: FormData) {
   revalidatePath(`/admin/ladders/${ladderId}`);
   revalidatePath(`/ladders/${ladderId}`);
   redirectWithMessage(ladderId, "Player removed.");
+}
+
+async function togglePlayerPaid(formData: FormData) {
+  "use server";
+
+  const ladderId = String(formData.get("ladderId") ?? "");
+  const playerId = String(formData.get("playerId") ?? "");
+  const paidRaw = String(formData.get("paid") ?? "");
+
+  if (!ladderId || !playerId || (paidRaw !== "true" && paidRaw !== "false")) {
+    return;
+  }
+
+  const player = await prisma.ladderPlayer.findUnique({
+    where: { id: playerId },
+    select: { ladderId: true },
+  });
+
+  if (!player || player.ladderId !== ladderId) {
+    return;
+  }
+
+  await prisma.ladderPlayer.update({
+    where: { id: playerId },
+    data: { paid: paidRaw === "true" },
+  });
+
+  revalidatePath(`/admin/ladders/${ladderId}`);
 }
 
 async function createChallenge(formData: FormData) {
@@ -331,22 +379,226 @@ async function cancelChallenge(formData: FormData) {
   redirectWithMessage(ladderId, "Challenge cancelled.");
 }
 
+async function generateFirstRoundMatches(formData: FormData) {
+  "use server";
+
+  const ladderId = String(formData.get("ladderId") ?? "");
+  if (!ladderId) {
+    return;
+  }
+
+  const ladder = await prisma.ladder.findUnique({
+    where: { id: ladderId },
+    include: {
+      players: {
+        where: { active: true },
+        orderBy: { position: "asc" },
+      },
+    },
+  });
+
+  if (!ladder || ladder.status !== LadderStatus.ACTIVE) {
+    redirectWithError(ladderId, "Ladder must be active to generate first-round matches.");
+    return;
+  }
+
+  if (ladder.players.length < 2) {
+    redirectWithError(ladderId, "Need at least 2 players for the first round.");
+    return;
+  }
+
+  if (ladder.players.length % 2 !== 0) {
+    redirectWithError(
+      ladderId,
+      `Need an even number of players (currently ${ladder.players.length}). Add or remove one player.`,
+    );
+    return;
+  }
+
+  const existingFirstRound = await prisma.ladderChallenge.count({
+    where: { ladderId, isFirstRound: true },
+  });
+  if (existingFirstRound > 0) {
+    redirectWithError(
+      ladderId,
+      "First-round matches already exist. Cancel/delete them before generating again.",
+    );
+    return;
+  }
+
+  const openChallenges = await prisma.ladderChallenge.count({
+    where: { ladderId, status: { in: OPEN_CHALLENGE_STATUSES } },
+  });
+  if (openChallenges > 0) {
+    redirectWithError(ladderId, "Close or cancel open challenges before generating first round.");
+    return;
+  }
+
+  const pairs = buildFirstRoundPairs(ladder.players);
+  await prisma.ladderChallenge.createMany({
+    data: pairs.map((pair) => ({
+      ladderId,
+      challengerId: pair.challenger.id,
+      challengedId: pair.challenged.id,
+      status: LadderChallengeStatus.ACCEPTED,
+      isFirstRound: true,
+    })),
+  });
+
+  revalidatePath(`/admin/ladders/${ladderId}`);
+  revalidatePath(`/ladders/${ladderId}`);
+  redirectWithMessage(
+    ladderId,
+    `Created ${pairs.length} first-round matches (paired by current order: 1v2, 3v4, …).`,
+  );
+}
+
+async function applyFirstRoundStandings(formData: FormData) {
+  "use server";
+
+  const ladderId = String(formData.get("ladderId") ?? "");
+  if (!ladderId) {
+    return;
+  }
+
+  const firstRoundMatches = await prisma.ladderChallenge.findMany({
+    where: { ladderId, isFirstRound: true },
+    include: {
+      challenger: true,
+      challenged: true,
+    },
+  });
+
+  if (firstRoundMatches.length === 0) {
+    redirectWithError(ladderId, "No first-round matches found.");
+  }
+
+  const incomplete = firstRoundMatches.filter(
+    (match) => match.status !== LadderChallengeStatus.COMPLETED,
+  );
+  if (incomplete.length > 0) {
+    redirectWithError(
+      ladderId,
+      `Finish all first-round matches first (${incomplete.length} still open).`,
+    );
+  }
+
+  const standings = firstRoundMatches.flatMap((match) => {
+    const challengerGames =
+      (match.set1ChallengerGames ?? 0) +
+      (match.set2ChallengerGames ?? 0) +
+      (match.set3ChallengerGames ?? 0);
+    const challengedGames =
+      (match.set1ChallengedGames ?? 0) +
+      (match.set2ChallengedGames ?? 0) +
+      (match.set3ChallengedGames ?? 0);
+    const challengerSets = match.challengerSets ?? 0;
+    const challengedSets = match.challengedSets ?? 0;
+    const challengerWon = match.winnerId === match.challengerId;
+
+    return [
+      {
+        playerId: match.challengerId,
+        fullName: match.challenger.fullName,
+        won: challengerWon,
+        setsWon: challengerSets,
+        setsLost: challengedSets,
+        gamesWon: challengerGames,
+        gamesLost: challengedGames,
+      },
+      {
+        playerId: match.challengedId,
+        fullName: match.challenged.fullName,
+        won: !challengerWon,
+        setsWon: challengedSets,
+        setsLost: challengerSets,
+        gamesWon: challengedGames,
+        gamesLost: challengerGames,
+      },
+    ];
+  });
+
+  const ordered = sortFirstRoundStandings(standings);
+
+  await prisma.$transaction(async (tx) => {
+    // Move everyone to temporary negative positions to avoid unique collisions.
+    for (const [index, row] of ordered.entries()) {
+      await tx.ladderPlayer.update({
+        where: { id: row.playerId },
+        data: { position: -(index + 1) },
+      });
+    }
+    for (const [index, row] of ordered.entries()) {
+      await tx.ladderPlayer.update({
+        where: { id: row.playerId },
+        data: { position: index + 1 },
+      });
+    }
+  });
+
+  revalidatePath(`/admin/ladders/${ladderId}`);
+  revalidatePath(`/ladders/${ladderId}`);
+  redirectWithMessage(
+    ladderId,
+    "First-round ladder order applied. Strongest wins (e.g. 6-0 6-0) are at the top.",
+  );
+}
+
 async function completeChallenge(formData: FormData) {
   "use server";
 
   const ladderId = String(formData.get("ladderId") ?? "");
   const challengeId = String(formData.get("challengeId") ?? "");
-  const challengerSets = Number.parseInt(String(formData.get("challengerSets") ?? ""), 10);
-  const challengedSets = Number.parseInt(String(formData.get("challengedSets") ?? ""), 10);
   const courtRaw = String(formData.get("court") ?? "").trim();
   const court = courtRaw ? Number.parseInt(courtRaw, 10) : null;
 
-  if (!ladderId || !challengeId || Number.isNaN(challengerSets) || Number.isNaN(challengedSets)) {
-    redirectWithError(ladderId || "unknown", "Enter a valid best-of-3 set score.");
+  const set1ChallengerGames = readOptionalInt(formData, "set1ChallengerGames");
+  const set1ChallengedGames = readOptionalInt(formData, "set1ChallengedGames");
+  const set2ChallengerGames = readOptionalInt(formData, "set2ChallengerGames");
+  const set2ChallengedGames = readOptionalInt(formData, "set2ChallengedGames");
+  const set3ChallengerGames = readOptionalInt(formData, "set3ChallengerGames");
+  const set3ChallengedGames = readOptionalInt(formData, "set3ChallengedGames");
+
+  if (
+    set1ChallengerGames == null ||
+    set1ChallengedGames == null ||
+    set2ChallengerGames == null ||
+    set2ChallengedGames == null
+  ) {
+    redirectWithError(ladderId || "unknown", "Enter games for set 1 and set 2.");
+    return;
   }
 
-  if (!isValidBestOfThreeSetsScore(challengerSets, challengedSets)) {
-    redirectWithError(ladderId, "Valid scores are 2-0, 2-1, 1-2, or 0-2.");
+  const set1 = {
+    challengerGames: set1ChallengerGames,
+    challengedGames: set1ChallengedGames,
+  };
+  const set2 = {
+    challengerGames: set2ChallengerGames,
+    challengedGames: set2ChallengedGames,
+  };
+
+  const set3 =
+    set3ChallengerGames != null && set3ChallengedGames != null
+      ? { challengerGames: set3ChallengerGames, challengedGames: set3ChallengedGames }
+      : set3ChallengerGames != null || set3ChallengedGames != null
+        ? null
+        : undefined;
+
+  if (set3 === null) {
+    redirectWithError(ladderId, "Enter both game counts for set 3, or leave set 3 empty.");
+    return;
+  }
+
+  const parsed = parseBestOfThreeSetScores({
+    set1,
+    set2,
+    set3: set3 ?? null,
+  });
+
+  if (parsed.error) {
+    redirectWithError(ladderId, parsed.error);
+    return;
   }
 
   const challenge = await prisma.ladderChallenge.findUnique({
@@ -369,17 +621,26 @@ async function completeChallenge(formData: FormData) {
   }
 
   const winnerId =
-    challengerSets > challengedSets ? challenge.challengerId : challenge.challengedId;
+    parsed.challengerSets > parsed.challengedSets
+      ? challenge.challengerId
+      : challenge.challengedId;
   const completedAt = new Date();
-  const swap = shouldSwapPositions(winnerId, challenge.challengerId);
+  const swap =
+    !challenge.isFirstRound && shouldSwapPositions(winnerId, challenge.challengerId);
 
   await prisma.$transaction(async (tx) => {
     await tx.ladderChallenge.update({
       where: { id: challengeId },
       data: {
         status: LadderChallengeStatus.COMPLETED,
-        challengerSets,
-        challengedSets,
+        challengerSets: parsed.challengerSets,
+        challengedSets: parsed.challengedSets,
+        set1ChallengerGames,
+        set1ChallengedGames,
+        set2ChallengerGames,
+        set2ChallengedGames,
+        set3ChallengerGames: set3?.challengerGames ?? null,
+        set3ChallengedGames: set3?.challengedGames ?? null,
         winnerId,
         completedAt,
         court: court && !Number.isNaN(court) ? court : null,
@@ -419,7 +680,11 @@ async function completeChallenge(formData: FormData) {
   revalidatePath(`/ladders/${ladderId}`);
   redirectWithMessage(
     ladderId,
-    swap ? "Result saved. Players swapped positions." : "Result saved. Rankings unchanged.",
+    challenge.isFirstRound
+      ? "First-round result saved. When all matches are done, apply first-round ladder order."
+      : swap
+        ? "Result saved. Players swapped positions."
+        : "Result saved. Rankings unchanged.",
   );
 }
 
@@ -572,6 +837,15 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
   const completedChallenges = ladder.challenges.filter(
     (challenge) => challenge.status === LadderChallengeStatus.COMPLETED,
   );
+  const firstRoundMatches = ladder.challenges.filter((challenge) => challenge.isFirstRound);
+  const firstRoundOpen = firstRoundMatches.filter((challenge) =>
+    OPEN_CHALLENGE_STATUSES.includes(challenge.status),
+  );
+  const firstRoundCompleted = firstRoundMatches.filter(
+    (challenge) => challenge.status === LadderChallengeStatus.COMPLETED,
+  );
+  const canApplyFirstRound =
+    firstRoundMatches.length > 0 && firstRoundOpen.length === 0 && firstRoundCompleted.length > 0;
 
   return (
     <div className="min-h-screen bg-zinc-50 px-3 py-6 text-zinc-900 dark:bg-black dark:text-zinc-100 sm:px-6 sm:py-12">
@@ -588,7 +862,12 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
         <header className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950 sm:p-8">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{ladder.name}</h1>
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{ladder.name}</h1>
+                <span className="rounded-full bg-zinc-900 px-2 py-1 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                  {formatLadderLevelLabel(ladder.level)}
+                </span>
+              </div>
               <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
                 Challenge up to {ladder.challengeRange} places · Cooldown {ladder.cooldownDays} days ·
                 Inactivity {ladder.inactivityDays} days · Best of 3 sets
@@ -707,7 +986,11 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="text-lg font-medium">Players ({ladder.players.length})</h2>
+            <h2 className="text-lg font-medium">
+              Players ({ladder.players.length}) · Paid{" "}
+              {ladder.players.filter((player) => player.paid).length}/
+              {ladder.players.length}
+            </h2>
             <form action={runInactivityCheck}>
               <input type="hidden" name="ladderId" value={ladder.id} />
               <button
@@ -728,10 +1011,11 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
               className="min-w-[180px] flex-1 rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
             />
             <input
-              name="countryCode"
-              placeholder="CYP"
-              maxLength={3}
-              className="w-20 rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+              name="phone"
+              type="tel"
+              required
+              placeholder="Telephone"
+              className="min-w-[140px] rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
             />
             <button
               type="submit"
@@ -747,6 +1031,8 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
                 <tr>
                   <th className="px-2 py-2 font-medium">Pos</th>
                   <th className="px-2 py-2 font-medium">Player</th>
+                  <th className="px-2 py-2 font-medium">Phone</th>
+                  <th className="px-2 py-2 font-medium">Paid</th>
                   <th className="px-2 py-2 font-medium hidden sm:table-cell">Last match</th>
                   <th className="px-2 py-2 font-medium">Remove</th>
                 </tr>
@@ -755,9 +1041,41 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
                 {ladder.players.map((player) => (
                   <tr key={player.id} className="border-b border-black/5 dark:border-white/5">
                     <td className="px-2 py-2">{player.position}</td>
+                    <td className="px-2 py-2">{player.fullName}</td>
+                    <td className="px-2 py-2">{player.phone || "—"}</td>
                     <td className="px-2 py-2">
-                      {player.fullName}
-                      {player.countryCode ? ` (${player.countryCode})` : ""}
+                      <div className="flex gap-1">
+                        <form action={togglePlayerPaid}>
+                          <input type="hidden" name="ladderId" value={ladder.id} />
+                          <input type="hidden" name="playerId" value={player.id} />
+                          <input type="hidden" name="paid" value="true" />
+                          <button
+                            type="submit"
+                            className={`rounded-md px-2 py-1 text-xs ${
+                              player.paid
+                                ? "bg-emerald-600 text-white"
+                                : "border border-black/15 hover:bg-black/5 dark:border-white/20"
+                            }`}
+                          >
+                            Yes
+                          </button>
+                        </form>
+                        <form action={togglePlayerPaid}>
+                          <input type="hidden" name="ladderId" value={ladder.id} />
+                          <input type="hidden" name="playerId" value={player.id} />
+                          <input type="hidden" name="paid" value="false" />
+                          <button
+                            type="submit"
+                            className={`rounded-md px-2 py-1 text-xs ${
+                              !player.paid
+                                ? "bg-zinc-700 text-white dark:bg-zinc-300 dark:text-zinc-900"
+                                : "border border-black/15 hover:bg-black/5 dark:border-white/20"
+                            }`}
+                          >
+                            No
+                          </button>
+                        </form>
+                      </div>
                     </td>
                     <td className="px-2 py-2 hidden sm:table-cell">
                       {player.lastMatchAt
@@ -778,6 +1096,51 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
               </tbody>
             </table>
           </div>
+        </section>
+
+        <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:p-6">
+          <h2 className="text-lg font-medium">First round (seed the ladder)</h2>
+          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+            With an even number of players (e.g. 30 → 15 matches), pair by current order: #1 vs #2,
+            #3 vs #4, and so on. Enter full set scores (games). After all matches are finished,
+            apply the order so the strongest wins sit at the top.
+          </p>
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-zinc-600 dark:text-zinc-300">
+            <li>All winners rank above all losers</li>
+            <li>
+              Among winners: 2-0 above 2-1; then fewer games lost (6-0 6-0 above 6-0 6-1 above
+              6-2 6-3)
+            </li>
+            <li>Among losers: closer losses rank higher</li>
+          </ul>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <form action={generateFirstRoundMatches}>
+              <input type="hidden" name="ladderId" value={ladder.id} />
+              <button
+                type="submit"
+                className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
+              >
+                Generate first-round matches
+              </button>
+            </form>
+            {canApplyFirstRound ? (
+              <form action={applyFirstRoundStandings}>
+                <input type="hidden" name="ladderId" value={ladder.id} />
+                <button
+                  type="submit"
+                  className="rounded-md border border-black/15 px-4 py-2 text-sm hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+                >
+                  Apply first-round ladder order
+                </button>
+              </form>
+            ) : null}
+          </div>
+          {firstRoundMatches.length > 0 ? (
+            <p className="mt-3 text-xs text-zinc-500">
+              First round: {firstRoundCompleted.length}/{firstRoundMatches.length} completed
+              {firstRoundOpen.length > 0 ? ` · ${firstRoundOpen.length} still open` : ""}
+            </p>
+          ) : null}
         </section>
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:p-6">
@@ -842,6 +1205,7 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
                   <p className="text-sm font-medium">
                     #{challenge.challenger.position} {challenge.challenger.fullName} vs #
                     {challenge.challenged.position} {challenge.challenged.fullName}
+                    {challenge.isFirstRound ? " · First round" : ""}
                   </p>
                   <p className="mt-1 text-xs text-zinc-500">{challenge.status}</p>
                   <div className="mt-3 flex flex-wrap gap-2">
@@ -868,43 +1232,96 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
                       </button>
                     </form>
                   </div>
-                  <form action={completeChallenge} className="mt-3 flex flex-wrap items-center gap-2">
+                  <form action={completeChallenge} className="mt-3 grid gap-2 sm:grid-cols-2">
                     <input type="hidden" name="ladderId" value={ladder.id} />
                     <input type="hidden" name="challengeId" value={challenge.id} />
-                    <input
-                      name="challengerSets"
-                      type="number"
-                      min={0}
-                      max={2}
-                      required
-                      placeholder="Ch sets"
-                      className="w-20 rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
-                    />
-                    <span className="text-xs">-</span>
-                    <input
-                      name="challengedSets"
-                      type="number"
-                      min={0}
-                      max={2}
-                      required
-                      placeholder="Def sets"
-                      className="w-20 rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
-                    />
-                    <select
-                      name="court"
-                      className="rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
-                    >
-                      <option value="">Court</option>
-                      <option value="1">Court 1</option>
-                      <option value="2">Court 2</option>
-                      <option value="3">Court 3</option>
-                    </select>
-                    <button
-                      type="submit"
-                      className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
-                    >
-                      Save result (best of 3)
-                    </button>
+                    <label className="flex flex-col gap-1 text-xs">
+                      <span>
+                        Set 1 games ({challenge.challenger.fullName} - {challenge.challenged.fullName}
+                        )
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <input
+                          name="set1ChallengerGames"
+                          type="number"
+                          min={0}
+                          max={7}
+                          required
+                          className="w-16 rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                        />
+                        <span>-</span>
+                        <input
+                          name="set1ChallengedGames"
+                          type="number"
+                          min={0}
+                          max={7}
+                          required
+                          className="w-16 rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                        />
+                      </span>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs">
+                      <span>Set 2 games</span>
+                      <span className="flex items-center gap-1">
+                        <input
+                          name="set2ChallengerGames"
+                          type="number"
+                          min={0}
+                          max={7}
+                          required
+                          className="w-16 rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                        />
+                        <span>-</span>
+                        <input
+                          name="set2ChallengedGames"
+                          type="number"
+                          min={0}
+                          max={7}
+                          required
+                          className="w-16 rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                        />
+                      </span>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs">
+                      <span>Set 3 games (only if 1-1)</span>
+                      <span className="flex items-center gap-1">
+                        <input
+                          name="set3ChallengerGames"
+                          type="number"
+                          min={0}
+                          max={7}
+                          className="w-16 rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                        />
+                        <span>-</span>
+                        <input
+                          name="set3ChallengedGames"
+                          type="number"
+                          min={0}
+                          max={7}
+                          className="w-16 rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                        />
+                      </span>
+                    </label>
+                    <label className="flex flex-col gap-1 text-xs">
+                      <span>Court</span>
+                      <select
+                        name="court"
+                        className="rounded-md border border-black/15 px-2 py-1 dark:border-white/20"
+                      >
+                        <option value="">Court</option>
+                        <option value="1">Court 1</option>
+                        <option value="2">Court 2</option>
+                        <option value="3">Court 3</option>
+                      </select>
+                    </label>
+                    <div className="sm:col-span-2">
+                      <button
+                        type="submit"
+                        className="rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900"
+                      >
+                        Save result (best of 3 sets)
+                      </button>
+                    </div>
                   </form>
                 </article>
               ))}
@@ -920,8 +1337,19 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
             <ul className="mt-3 space-y-2 text-sm">
               {completedChallenges.slice(0, 15).map((challenge) => (
                 <li key={challenge.id}>
-                  {challenge.challenger.fullName} {challenge.challengerSets}-
-                  {challenge.challengedSets} {challenge.challenged.fullName}
+                  {challenge.challenger.fullName}{" "}
+                  {formatSetScoreLine({
+                    set1ChallengerGames: challenge.set1ChallengerGames,
+                    set1ChallengedGames: challenge.set1ChallengedGames,
+                    set2ChallengerGames: challenge.set2ChallengerGames,
+                    set2ChallengedGames: challenge.set2ChallengedGames,
+                    set3ChallengerGames: challenge.set3ChallengerGames,
+                    set3ChallengedGames: challenge.set3ChallengedGames,
+                    challengerSets: challenge.challengerSets,
+                    challengedSets: challenge.challengedSets,
+                  })}{" "}
+                  {challenge.challenged.fullName}
+                  {challenge.isFirstRound ? " · First round" : ""}
                   {challenge.completedAt
                     ? ` · ${challenge.completedAt.toLocaleDateString("en-GB")}`
                     : ""}

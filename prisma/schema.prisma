@@ -88,6 +88,13 @@ enum LadderStatus {
   ARCHIVED
 }
 
+enum LadderLevel {
+  BEGINNER
+  BEGINNER_INTERMEDIATE
+  INTERMEDIATE
+  ADVANCED
+}
+
 enum LadderChallengeStatus {
   PENDING
   ACCEPTED
@@ -100,6 +107,7 @@ enum LadderChallengeStatus {
 model Ladder {
   id                String         @id @default(cuid())
   name              String
+  level             LadderLevel
   description       String?
   location          String?
   challengeRange    Int            @default(3)
@@ -112,13 +120,17 @@ model Ladder {
   updatedAt         DateTime       @updatedAt
   players           LadderPlayer[]
   challenges        LadderChallenge[]
+
+  @@index([level, status])
 }
 
 model LadderPlayer {
   id           String   @id @default(cuid())
   fullName     String
+  phone        String
   countryCode  String?  @db.VarChar(3)
   position     Int
+  paid         Boolean  @default(false)
   lastMatchAt  DateTime?
   active       Boolean  @default(true)
   registeredAt DateTime @default(now())
@@ -132,22 +144,30 @@ model LadderPlayer {
 }
 
 model LadderChallenge {
-  id              String                @id @default(cuid())
-  ladderId        String
-  challengerId    String
-  challengedId    String
-  status          LadderChallengeStatus @default(PENDING)
-  scheduledAt     DateTime?
-  court           Int?
-  challengerSets  Int?
-  challengedSets  Int?
-  winnerId        String?
-  completedAt     DateTime?
-  createdAt       DateTime              @default(now())
-  updatedAt       DateTime              @updatedAt
-  ladder          Ladder                @relation(fields: [ladderId], references: [id], onDelete: Cascade)
-  challenger      LadderPlayer          @relation("ladder_challenger", fields: [challengerId], references: [id], onDelete: Restrict)
-  challenged      LadderPlayer          @relation("ladder_challenged", fields: [challengedId], references: [id], onDelete: Restrict)
+  id                   String                @id @default(cuid())
+  ladderId             String
+  challengerId         String
+  challengedId         String
+  status               LadderChallengeStatus @default(PENDING)
+  isFirstRound         Boolean               @default(false)
+  scheduledAt          DateTime?
+  court                Int?
+  challengerSets       Int?
+  challengedSets       Int?
+  set1ChallengerGames  Int?
+  set1ChallengedGames  Int?
+  set2ChallengerGames  Int?
+  set2ChallengedGames  Int?
+  set3ChallengerGames  Int?
+  set3ChallengedGames  Int?
+  winnerId             String?
+  completedAt          DateTime?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  ladder               Ladder                @relation(fields: [ladderId], references: [id], onDelete: Cascade)
+  challenger           LadderPlayer          @relation("ladder_challenger", fields: [challengerId], references: [id], onDelete: Restrict)
+  challenged           LadderPlayer          @relation("ladder_challenged", fields: [challengedId], references: [id], onDelete: Restrict)
 
   @@index([ladderId, status])
+  @@index([ladderId, isFirstRound])
 }

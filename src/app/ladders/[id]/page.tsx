@@ -3,7 +3,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { LadderChallengeStatus, LadderStatus } from "@prisma/client";
 
-import { normalizePlayerName } from "@/lib/ladder";
+import {
+  formatLadderLevelLabel,
+  isValidPhone,
+  normalizePhone,
+  normalizePlayerName,
+} from "@/lib/ladder";
 import { prisma } from "@/lib/prisma";
 
 type PageProps = {
@@ -16,13 +21,16 @@ async function registerPlayer(formData: FormData) {
 
   const ladderId = String(formData.get("ladderId") ?? "");
   const fullName = String(formData.get("fullName") ?? "").trim().replace(/\s+/g, " ");
-  const countryCode = String(formData.get("countryCode") ?? "")
-    .trim()
-    .toUpperCase()
-    .slice(0, 3);
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
 
-  if (!ladderId || !fullName) {
-    redirect(`/ladders/${ladderId || ""}?error=${encodeURIComponent("Please enter your full name.")}`);
+  if (!ladderId || !fullName || !phone) {
+    redirect(
+      `/ladders/${ladderId || ""}?error=${encodeURIComponent("Please enter full name and telephone number.")}`,
+    );
+  }
+
+  if (!isValidPhone(phone)) {
+    redirect(`/ladders/${ladderId}?error=${encodeURIComponent("Please enter a valid telephone number.")}`);
   }
 
   const ladder = await prisma.ladder.findUnique({
@@ -30,7 +38,7 @@ async function registerPlayer(formData: FormData) {
     include: {
       players: {
         where: { active: true },
-        select: { fullName: true },
+        select: { fullName: true, phone: true },
       },
     },
   });
@@ -48,11 +56,13 @@ async function registerPlayer(formData: FormData) {
   }
 
   const duplicate = ladder.players.find(
-    (player) => normalizePlayerName(player.fullName) === normalizePlayerName(fullName),
+    (player) =>
+      normalizePlayerName(player.fullName) === normalizePlayerName(fullName) ||
+      normalizePhone(player.phone) === phone,
   );
   if (duplicate) {
     redirect(
-      `/ladders/${ladderId}?error=${encodeURIComponent("This name is already registered on this ladder.")}`,
+      `/ladders/${ladderId}?error=${encodeURIComponent("This name or telephone is already registered on this ladder.")}`,
     );
   }
 
@@ -66,7 +76,7 @@ async function registerPlayer(formData: FormData) {
     data: {
       ladderId,
       fullName,
-      countryCode: countryCode || null,
+      phone,
       position: (bottom?.position ?? 0) + 1,
       active: true,
     },
@@ -144,7 +154,12 @@ export default async function LadderDetailPage({ params, searchParams }: PagePro
         </div>
 
         <header className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950 sm:p-8">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{ladder.name}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">{ladder.name}</h1>
+            <span className="rounded-full bg-zinc-900 px-2 py-1 text-xs font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+              {formatLadderLevelLabel(ladder.level)}
+            </span>
+          </div>
           {ladder.description ? (
             <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{ladder.description}</p>
           ) : null}
@@ -171,32 +186,41 @@ export default async function LadderDetailPage({ params, searchParams }: PagePro
         ) : null}
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:p-6">
-          <h2 className="text-lg font-medium">Register</h2>
+          <h2 className="text-lg font-medium">Register for {formatLadderLevelLabel(ladder.level)}</h2>
           {canRegister ? (
             <>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                New players join at the bottom of the ladder.
+                New players join at the bottom of this ladder.
               </p>
-              <form action={registerPlayer} className="mt-4 flex flex-wrap gap-2">
+              <form action={registerPlayer} className="mt-4 grid gap-3 sm:grid-cols-2">
                 <input type="hidden" name="ladderId" value={ladder.id} />
-                <input
-                  name="fullName"
-                  required
-                  placeholder="Full name"
-                  className="min-w-[180px] flex-1 rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
-                />
-                <input
-                  name="countryCode"
-                  placeholder="CYP"
-                  maxLength={3}
-                  className="w-20 rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
-                />
-                <button
-                  type="submit"
-                  className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
-                >
-                  Register
-                </button>
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm">Full name</span>
+                  <input
+                    name="fullName"
+                    required
+                    placeholder="Full name"
+                    className="rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+                  />
+                </label>
+                <label className="flex flex-col gap-2">
+                  <span className="text-sm">Telephone number</span>
+                  <input
+                    name="phone"
+                    type="tel"
+                    required
+                    placeholder="e.g. 99 123456"
+                    className="rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm dark:border-white/20"
+                  />
+                </label>
+                <div className="sm:col-span-2">
+                  <button
+                    type="submit"
+                    className="rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700 dark:bg-zinc-100 dark:text-zinc-900"
+                  >
+                    Register
+                  </button>
+                </div>
               </form>
             </>
           ) : (
@@ -217,7 +241,6 @@ export default async function LadderDetailPage({ params, searchParams }: PagePro
                   <tr>
                     <th className="px-2 py-2 font-medium">Pos</th>
                     <th className="px-2 py-2 font-medium">Player</th>
-                    <th className="px-2 py-2 font-medium hidden sm:table-cell">Country</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -225,9 +248,6 @@ export default async function LadderDetailPage({ params, searchParams }: PagePro
                     <tr key={player.id} className="border-b border-black/5 dark:border-white/5">
                       <td className="px-2 py-2 font-medium">{player.position}</td>
                       <td className="px-2 py-2">{player.fullName}</td>
-                      <td className="px-2 py-2 hidden sm:table-cell">
-                        {player.countryCode ?? "—"}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
