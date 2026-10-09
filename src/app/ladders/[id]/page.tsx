@@ -186,11 +186,12 @@ export default async function LadderDetailPage({ params, searchParams }: PagePro
         ) : null}
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:p-6">
-          <h2 className="text-lg font-medium">Register for {formatLadderLevelLabel(ladder.level)}</h2>
+          <h2 className="text-lg font-medium">Register</h2>
           {canRegister ? (
             <>
               <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">
-                New players join at the bottom of this ladder.
+                Join <span className="font-medium">{ladder.name}</span> with your full name and
+                telephone. New players start at the bottom of the ladder.
               </p>
               <form action={registerPlayer} className="mt-4 grid gap-3 sm:grid-cols-2">
                 <input type="hidden" name="ladderId" value={ladder.id} />

@@ -136,8 +136,8 @@ export default async function AdminLaddersPage({ searchParams }: PageProps) {
         <header className="rounded-2xl border border-black/10 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-zinc-950 sm:p-8">
           <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">Ladder Leagues</h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-            Create one ladder per level (Beginner, Beginner/Intermediate, Intermediate, Advanced).
-            Players register with full name, telephone, and level.
+            Create a separate league for each level. Players open that league and register with full
+            name and telephone only.
           </p>
         </header>
 
