@@ -7,6 +7,7 @@ import {
 } from "@prisma/client";
 
 import DeleteLadderButton from "@/app/components/DeleteLadderButton";
+import PaymentCheckbox from "@/app/components/PaymentCheckbox";
 import {
   OPEN_CHALLENGE_STATUSES,
   buildFirstRoundPairs,
@@ -1030,9 +1031,8 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
               <thead className="border-b border-black/10 dark:border-white/10">
                 <tr>
                   <th className="px-2 py-2 font-medium">Pos</th>
-                  <th className="px-2 py-2 font-medium">Player</th>
+                  <th className="px-2 py-2 font-medium">Player / Paid</th>
                   <th className="px-2 py-2 font-medium">Phone</th>
-                  <th className="px-2 py-2 font-medium">Paid</th>
                   <th className="px-2 py-2 font-medium hidden sm:table-cell">Last match</th>
                   <th className="px-2 py-2 font-medium">Remove</th>
                 </tr>
@@ -1041,42 +1041,16 @@ export default async function AdminLadderDetailPage({ params, searchParams }: Pa
                 {ladder.players.map((player) => (
                   <tr key={player.id} className="border-b border-black/5 dark:border-white/5">
                     <td className="px-2 py-2">{player.position}</td>
-                    <td className="px-2 py-2">{player.fullName}</td>
-                    <td className="px-2 py-2">{player.phone || "—"}</td>
                     <td className="px-2 py-2">
-                      <div className="flex gap-1">
-                        <form action={togglePlayerPaid}>
-                          <input type="hidden" name="ladderId" value={ladder.id} />
-                          <input type="hidden" name="playerId" value={player.id} />
-                          <input type="hidden" name="paid" value="true" />
-                          <button
-                            type="submit"
-                            className={`rounded-md px-2 py-1 text-xs ${
-                              player.paid
-                                ? "bg-emerald-600 text-white"
-                                : "border border-black/15 hover:bg-black/5 dark:border-white/20"
-                            }`}
-                          >
-                            Yes
-                          </button>
-                        </form>
-                        <form action={togglePlayerPaid}>
-                          <input type="hidden" name="ladderId" value={ladder.id} />
-                          <input type="hidden" name="playerId" value={player.id} />
-                          <input type="hidden" name="paid" value="false" />
-                          <button
-                            type="submit"
-                            className={`rounded-md px-2 py-1 text-xs ${
-                              !player.paid
-                                ? "bg-zinc-700 text-white dark:bg-zinc-300 dark:text-zinc-900"
-                                : "border border-black/15 hover:bg-black/5 dark:border-white/20"
-                            }`}
-                          >
-                            No
-                          </button>
-                        </form>
-                      </div>
+                      <PaymentCheckbox
+                        ladderId={ladder.id}
+                        playerId={player.id}
+                        paid={player.paid}
+                        playerName={player.fullName}
+                        togglePlayerPaid={togglePlayerPaid}
+                      />
                     </td>
+                    <td className="px-2 py-2">{player.phone || "—"}</td>
                     <td className="px-2 py-2 hidden sm:table-cell">
                       {player.lastMatchAt
                         ? player.lastMatchAt.toLocaleDateString("en-GB")
