@@ -10,36 +10,12 @@ import {
   isBestOfThreeSuperTiebreak,
 } from "@/lib/match-setup";
 import { prisma } from "@/lib/prisma";
+import { sortStandingRows, type StandingRow } from "@/lib/tournament-standings";
 
 type PageProps = {
   params: Promise<{ id: string }>;
   searchParams?: Promise<{ phase?: string }>;
 };
-
-type StandingRow = {
-  playerId: string;
-  playerName: string;
-  played: number;
-  wins: number;
-  losses: number;
-  gamesWon: number;
-  gamesLost: number;
-  gamePoints: number;
-};
-
-function sortStandingRows(rows: StandingRow[], useGamePoints: boolean) {
-  return [...rows].sort((a, b) => {
-    if (useGamePoints && b.gamePoints !== a.gamePoints) {
-      return b.gamePoints - a.gamePoints;
-    }
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    const aDiff = a.gamesWon - a.gamesLost;
-    const bDiff = b.gamesWon - b.gamesLost;
-    if (bDiff !== aDiff) return bDiff - aDiff;
-    if (b.gamesWon !== a.gamesWon) return b.gamesWon - a.gamesWon;
-    return a.playerName.localeCompare(b.playerName);
-  });
-}
 
 function formatKnockoutRound(round: string) {
   const withoutPrefix = round.replace(/^Knockout\s+/i, "").trim();
@@ -138,14 +114,20 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
       }
     }
 
-    standingsByGroup.set(groupNumber, sortStandingRows([...rows.values()], tournament.standingsUseGamePoints));
-
     const groupPlayerIds = new Set(groupPlayers.map((player) => player.id));
     const groupMatches = tournament.matches.filter(
       (match) =>
         groupPlayerIds.has(match.homePlayerId) &&
         groupPlayerIds.has(match.awayPlayerId) &&
         match.round === `Group ${groupNumber}`,
+    );
+    standingsByGroup.set(
+      groupNumber,
+      sortStandingRows(
+        [...rows.values()],
+        tournament.standingsUseGamePoints,
+        groupMatches,
+      ),
     );
     groupMatchesByGroup.set(groupNumber, groupMatches);
   }

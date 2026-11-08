@@ -946,10 +946,6 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
       }
     }
 
-    const sortedRows = sortStandingRows([...rows.values()], tournament.standingsUseGamePoints);
-
-    standingsByGroup.set(groupNumber, sortedRows);
-
     const groupPlayerIds = new Set(groupPlayers.map((player) => player.id));
     const groupMatches = tournament.matches.filter(
       (match) =>
@@ -957,6 +953,13 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
         groupPlayerIds.has(match.awayPlayerId) &&
         match.round === `Group ${groupNumber}`,
     );
+    const sortedRows = sortStandingRows(
+      [...rows.values()],
+      tournament.standingsUseGamePoints,
+      groupMatches,
+    );
+
+    standingsByGroup.set(groupNumber, sortedRows);
     groupMatchesByGroup.set(groupNumber, groupMatches);
   }
 
