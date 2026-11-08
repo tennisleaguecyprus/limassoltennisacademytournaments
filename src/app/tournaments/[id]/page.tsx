@@ -3,13 +3,10 @@ import { notFound } from "next/navigation";
 import { EventType, TournamentFormat } from "@prisma/client";
 
 import AutoRefresh from "@/app/components/AutoRefresh";
+import PublicMatchScoreEditor from "@/app/components/PublicMatchScoreEditor";
 import { formatEntryName, formatEntryVersus } from "@/lib/entry-name";
 import { formatMatchScheduleDisplay } from "@/lib/match-schedule";
-import {
-  formatMatchScoreDisplay,
-  getMatchStandingContribution,
-  isBestOfThreeSuperTiebreak,
-} from "@/lib/match-setup";
+import { getMatchStandingContribution } from "@/lib/match-setup";
 import { prisma } from "@/lib/prisma";
 import { sortStandingRows, type StandingRow } from "@/lib/tournament-standings";
 
@@ -17,6 +14,12 @@ type PageProps = {
   params: Promise<{ id: string }>;
   searchParams?: Promise<{ phase?: string }>;
 };
+
+function resolveActivePhase(phase: string | undefined) {
+  if (phase === "knockout") return "knockout";
+  if (phase === "entries") return "entries";
+  return "group";
+}
 
 function formatKnockoutRound(round: string) {
   const withoutPrefix = round.replace(/^Knockout\s+/i, "").trim();
@@ -41,7 +44,7 @@ function formatTournamentDateRange(startsAt: Date, endsAt: Date) {
 export default async function TournamentPublicPage({ params, searchParams }: PageProps) {
   const { id } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
-  const activePhase = resolvedSearchParams?.phase === "knockout" ? "knockout" : "group";
+  const activePhase = resolveActivePhase(resolvedSearchParams?.phase);
 
   const tournament = await prisma.tournament.findUnique({
     where: { id },
@@ -137,7 +140,6 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
   const tournamentStatus =
     now < tournament.startsAt ? "Upcoming" : now > tournament.endsAt ? "Completed" : "Live";
   const isDoubles = tournament.eventType === EventType.DOUBLES;
-  const useSetsScoring = isBestOfThreeSuperTiebreak(tournament.matchSetupType);
   const knockoutMatches = tournament.matches
     .filter((match) => !match.round.startsWith("Group "))
     .sort((a, b) => {
@@ -181,7 +183,17 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
         </header>
 
         <section className="mt-6 rounded-xl border border-black/10 bg-white p-4 dark:border-white/10 dark:bg-zinc-950 sm:mt-8 sm:p-6">
-          <div className="grid grid-cols-2 gap-2 border-b border-black/10 pb-4 dark:border-white/10 sm:flex sm:flex-wrap">
+          <div className="grid grid-cols-3 gap-2 border-b border-black/10 pb-4 dark:border-white/10 sm:flex sm:flex-wrap">
+            <Link
+              href={`/tournaments/${tournament.id}?phase=entries`}
+              className={`rounded-md px-3 py-2 text-center text-sm ${
+                activePhase === "entries"
+                  ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                  : "border border-black/10 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+              }`}
+            >
+              Entry List
+            </Link>
             <Link
               href={`/tournaments/${tournament.id}?phase=group`}
               className={`rounded-md px-3 py-2 text-center text-sm ${
@@ -203,6 +215,84 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
               Knockout Phase
             </Link>
           </div>
+
+          {activePhase === "entries" && (
+            <>
+              <h2 className="mt-6 text-lg font-medium">Entry List</h2>
+              {tournament.players.length === 0 ? (
+                <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
+                  No entries yet.
+                </p>
+              ) : (
+                <>
+                  <div className="mt-4 grid gap-3 sm:hidden">
+                    {tournament.players.map((player, index) => (
+                      <article
+                        key={player.id}
+                        className="rounded-md border border-black/10 p-3 dark:border-white/10"
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-semibold">
+                            {formatEntryName(player, tournament.eventType)}
+                          </p>
+                          <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                            #{index + 1}
+                          </span>
+                        </div>
+                        <p className="mt-2 text-sm text-zinc-700 dark:text-zinc-300">
+                          <span className="text-zinc-500 dark:text-zinc-400">Telephone</span>{" "}
+                          {player.phone ? (
+                            <a href={`tel:${player.phone}`} className="underline-offset-2 hover:underline">
+                              {player.phone}
+                            </a>
+                          ) : (
+                            "—"
+                          )}
+                        </p>
+                      </article>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 hidden overflow-x-auto sm:block">
+                    <table className="w-full min-w-[480px] text-left text-sm">
+                      <thead className="border-b border-black/10 dark:border-white/10">
+                        <tr>
+                          <th className="px-2 py-2">#</th>
+                          <th className="px-2 py-2">{isDoubles ? "Pair" : "Player"}</th>
+                          <th className="px-2 py-2">Telephone</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tournament.players.map((player, index) => (
+                          <tr
+                            key={player.id}
+                            className="border-b border-black/5 dark:border-white/10"
+                          >
+                            <td className="px-2 py-2">{index + 1}</td>
+                            <td className="px-2 py-2">
+                              {formatEntryName(player, tournament.eventType)}
+                            </td>
+                            <td className="px-2 py-2">
+                              {player.phone ? (
+                                <a
+                                  href={`tel:${player.phone}`}
+                                  className="underline-offset-2 hover:underline"
+                                >
+                                  {player.phone}
+                                </a>
+                              ) : (
+                                "—"
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </>
+              )}
+            </>
+          )}
 
           {activePhase === "group" && (
             <>
@@ -315,15 +405,13 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                         tournament.eventType,
                                       )}
                                     </p>
-                                    <p className="mt-2 text-sm font-semibold">
-                                      Score:{" "}
-                                      {formatMatchScoreDisplay(
-                                        match.homeGames,
-                                        match.awayGames,
-                                        tournament.matchSetupType,
-                                        match,
-                                      )}
-                                    </p>
+                                    <div className="mt-2">
+                                      <PublicMatchScoreEditor
+                                        match={match}
+                                        tournamentId={tournament.id}
+                                        matchSetupType={tournament.matchSetupType}
+                                      />
+                                    </div>
                                     <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
                                       Schedule:{" "}
                                       {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
@@ -347,7 +435,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                     <th className="px-2 py-2 font-medium">Home</th>
                                     <th className="px-2 py-2 font-medium">Away</th>
                                     <th className="px-2 py-2 font-medium">Schedule</th>
-                                    <th className="px-2 py-2 font-medium">Score</th>
+                                    <th className="px-2 py-2 font-medium">Score / Update</th>
                                     <th className="px-2 py-2 font-medium">Winner</th>
                                   </tr>
                                 </thead>
@@ -367,12 +455,11 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                         {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
                                       </td>
                                       <td className="px-2 py-2">
-                                        {formatMatchScoreDisplay(
-                                          match.homeGames,
-                                          match.awayGames,
-                                          tournament.matchSetupType,
-                                          match,
-                                        )}
+                                        <PublicMatchScoreEditor
+                                          match={match}
+                                          tournamentId={tournament.id}
+                                          matchSetupType={tournament.matchSetupType}
+                                        />
                                       </td>
                                       <td className="px-2 py-2">
                                         {match.winnerId === match.homePlayerId
@@ -424,15 +511,13 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                             tournament.eventType,
                           )}
                         </p>
-                        <p className="mt-2 text-sm font-semibold">
-                          Score:{" "}
-                          {formatMatchScoreDisplay(
-                            match.homeGames,
-                            match.awayGames,
-                            tournament.matchSetupType,
-                            match,
-                          )}
-                        </p>
+                        <div className="mt-2">
+                          <PublicMatchScoreEditor
+                            match={match}
+                            tournamentId={tournament.id}
+                            matchSetupType={tournament.matchSetupType}
+                          />
+                        </div>
                         <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
                           Schedule: {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
                         </p>
@@ -456,7 +541,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                           <th className="px-2 py-2 font-medium">Home</th>
                           <th className="px-2 py-2 font-medium">Away</th>
                           <th className="px-2 py-2 font-medium">Schedule</th>
-                          <th className="px-2 py-2 font-medium">Score</th>
+                          <th className="px-2 py-2 font-medium">Score / Update</th>
                           <th className="px-2 py-2 font-medium">Winner</th>
                         </tr>
                       </thead>
@@ -474,12 +559,11 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                               {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
                             </td>
                             <td className="px-2 py-2">
-                              {formatMatchScoreDisplay(
-                                match.homeGames,
-                                match.awayGames,
-                                tournament.matchSetupType,
-                                match,
-                              )}
+                              <PublicMatchScoreEditor
+                                match={match}
+                                tournamentId={tournament.id}
+                                matchSetupType={tournament.matchSetupType}
+                              />
                             </td>
                             <td className="px-2 py-2">
                               {match.winnerId === match.homePlayerId

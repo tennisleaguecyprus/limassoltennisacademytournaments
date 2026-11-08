@@ -56,6 +56,7 @@ model Player {
   id           String      @id @default(cuid())
   fullName     String
   partnerName  String?
+  phone        String      @default("")
   countryCode  String?     @db.VarChar(3)
   ranking      Int?
   groupNumber  Int?

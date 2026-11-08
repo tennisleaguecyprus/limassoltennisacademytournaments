@@ -21,6 +21,9 @@ type MatchResultFormProps = {
   scoreInputLabel?: string;
   useSetsScoring?: boolean;
   compact?: boolean;
+  /** When true, only set scores are editable (for public users). */
+  scoresOnly?: boolean;
+  submitLabel?: string;
 };
 
 export default function MatchResultForm({
@@ -38,6 +41,8 @@ export default function MatchResultForm({
   initialSet3AwayGames = null,
   updateMatchResult,
   compact = false,
+  scoresOnly = false,
+  submitLabel = "Save",
 }: MatchResultFormProps) {
   const inputClass = `rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20 ${
     compact ? "w-12" : "w-14"
@@ -52,28 +57,34 @@ export default function MatchResultForm({
       <input type="hidden" name="tournamentId" value={tournamentId} />
       <input type="hidden" name="homePlayerId" value={homePlayerId} />
       <input type="hidden" name="awayPlayerId" value={awayPlayerId} />
-      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300">
-        <span className="sr-only">Time</span>
-        <input
-          name="scheduledTime"
-          type="time"
-          defaultValue={formatMatchTime(initialScheduledAt)}
-          className="rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
-        />
-      </label>
-      <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300">
-        <span className="sr-only">Court</span>
-        <select
-          name="court"
-          defaultValue={initialCourt ? String(initialCourt) : ""}
-          className="rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
-        >
-          <option value="">Court</option>
-          <option value="1">Court 1</option>
-          <option value="2">Court 2</option>
-          <option value="3">Court 3</option>
-        </select>
-      </label>
+      {scoresOnly ? <input type="hidden" name="scoresOnly" value="1" /> : null}
+
+      {!scoresOnly && (
+        <>
+          <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300">
+            <span className="sr-only">Time</span>
+            <input
+              name="scheduledTime"
+              type="time"
+              defaultValue={formatMatchTime(initialScheduledAt)}
+              className="rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
+            />
+          </label>
+          <label className="flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300">
+            <span className="sr-only">Court</span>
+            <select
+              name="court"
+              defaultValue={initialCourt ? String(initialCourt) : ""}
+              className="rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20"
+            >
+              <option value="">Court</option>
+              <option value="1">Court 1</option>
+              <option value="2">Court 2</option>
+              <option value="3">Court 3</option>
+            </select>
+          </label>
+        </>
+      )}
 
       <span className="text-[10px] text-zinc-500">S1</span>
       <input
@@ -150,7 +161,7 @@ export default function MatchResultForm({
         type="submit"
         className="rounded-md border border-black/15 px-2 py-1 text-xs hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
       >
-        Save
+        {submitLabel}
       </button>
     </form>
   );

@@ -9,6 +9,7 @@ type PlayerEditRowProps = {
   tournamentId: string;
   initialFullName: string;
   initialPartnerName: string | null;
+  initialPhone: string;
   initialGroupNumber: number | null;
   groupCount: number | null;
   showGroup: boolean;
@@ -22,6 +23,7 @@ export default function PlayerEditRow({
   tournamentId,
   initialFullName,
   initialPartnerName,
+  initialPhone,
   initialGroupNumber,
   groupCount,
   showGroup,
@@ -31,6 +33,7 @@ export default function PlayerEditRow({
 }: PlayerEditRowProps) {
   const [fullName, setFullName] = useState(initialFullName);
   const [partnerName, setPartnerName] = useState(initialPartnerName ?? "");
+  const [phone, setPhone] = useState(initialPhone);
   const [groupNumber, setGroupNumber] = useState(
     initialGroupNumber ? String(initialGroupNumber) : "",
   );
@@ -38,8 +41,9 @@ export default function PlayerEditRow({
   useEffect(() => {
     setFullName(initialFullName);
     setPartnerName(initialPartnerName ?? "");
+    setPhone(initialPhone);
     setGroupNumber(initialGroupNumber ? String(initialGroupNumber) : "");
-  }, [initialFullName, initialPartnerName, initialGroupNumber]);
+  }, [initialFullName, initialPartnerName, initialPhone, initialGroupNumber]);
 
   return (
     <>
@@ -63,6 +67,16 @@ export default function PlayerEditRow({
           />
         </td>
       )}
+      <td className="px-2 py-2">
+        <input
+          value={phone}
+          onChange={(event) => setPhone(event.target.value)}
+          required
+          placeholder="Telephone"
+          inputMode="tel"
+          className="w-full min-w-[120px] rounded-md border border-black/15 bg-transparent px-2 py-1 text-sm outline-none focus:ring-2 focus:ring-zinc-500 dark:border-white/20"
+        />
+      </td>
       {showGroup && (
         <td className="px-2 py-2">
           <select
@@ -85,6 +99,7 @@ export default function PlayerEditRow({
             <input type="hidden" name="playerId" value={playerId} />
             <input type="hidden" name="tournamentId" value={tournamentId} />
             <input type="hidden" name="fullName" value={fullName} />
+            <input type="hidden" name="phone" value={phone} />
             {isDoubles && <input type="hidden" name="partnerName" value={partnerName} />}
             {showGroup && <input type="hidden" name="groupNumber" value={groupNumber} />}
             <button

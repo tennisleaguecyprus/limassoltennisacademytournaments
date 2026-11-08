@@ -8,16 +8,17 @@ import MatchSetupFields from "@/app/components/MatchSetupFields";
 import PlayerEditRow from "@/app/components/PlayerEditRow";
 import { EventType, MatchSetupType, TournamentFormat } from "@prisma/client";
 import { entriesLabel, eventTypeLabel, formatEntryName, parseEventType } from "@/lib/entry-name";
-import { buildScheduledAt, formatMatchScheduleDisplay, parseCourt } from "@/lib/match-schedule";
+import { formatMatchScheduleDisplay } from "@/lib/match-schedule";
 import {
   formatMatchScoreDisplay,
   formatMatchSetupLabel,
   getMatchStandingContribution,
   isBestOfThreeSuperTiebreak,
-  parseDetailedMatchSetScores,
   parseMatchSetupType,
   resolveNumberOfSets,
 } from "@/lib/match-setup";
+import { updateMatchResult } from "@/lib/match-result-actions";
+import { isValidPhone, normalizePhone } from "@/lib/ladder";
 import { prisma } from "@/lib/prisma";
 import {
   buildKnockoutBracketMatches,
@@ -420,8 +421,9 @@ async function addPlayer(formData: FormData) {
   const tournamentId = String(formData.get("tournamentId") ?? "");
   const fullName = String(formData.get("fullName") ?? "").trim();
   const partnerName = String(formData.get("partnerName") ?? "").trim();
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
 
-  if (!tournamentId || !fullName) {
+  if (!tournamentId || !fullName || !phone || !isValidPhone(phone)) {
     return;
   }
 
@@ -443,10 +445,12 @@ async function addPlayer(formData: FormData) {
       tournamentId,
       fullName,
       partnerName: tournament.eventType === EventType.DOUBLES ? partnerName : null,
+      phone,
     },
   });
 
   revalidatePath(`/admin/tournaments/${tournamentId}`);
+  revalidatePath(`/tournaments/${tournamentId}`);
 }
 
 async function updatePlayer(formData: FormData) {
@@ -456,9 +460,10 @@ async function updatePlayer(formData: FormData) {
   const tournamentId = String(formData.get("tournamentId") ?? "");
   const fullName = String(formData.get("fullName") ?? "").trim();
   const partnerName = String(formData.get("partnerName") ?? "").trim();
+  const phone = normalizePhone(String(formData.get("phone") ?? ""));
   const groupNumberRaw = String(formData.get("groupNumber") ?? "").trim();
 
-  if (!playerId || !tournamentId || !fullName) {
+  if (!playerId || !tournamentId || !fullName || !phone || !isValidPhone(phone)) {
     return;
   }
 
@@ -502,6 +507,7 @@ async function updatePlayer(formData: FormData) {
     data: {
       fullName,
       partnerName: tournament.eventType === EventType.DOUBLES ? partnerName : null,
+      phone,
       ...(tournament.format === TournamentFormat.ROUND_ROBIN_AND_KNOCKOUT
         ? { groupNumber }
         : {}),
@@ -513,6 +519,7 @@ async function updatePlayer(formData: FormData) {
   }
 
   revalidatePath(`/admin/tournaments/${tournamentId}`);
+  revalidatePath(`/tournaments/${tournamentId}`);
 }
 
 async function deletePlayer(formData: FormData) {
@@ -555,6 +562,7 @@ async function deletePlayer(formData: FormData) {
   }
 
   revalidatePath(`/admin/tournaments/${tournamentId}`);
+  revalidatePath(`/tournaments/${tournamentId}`);
 }
 
 async function autoAssignGroups(formData: FormData) {
@@ -639,6 +647,7 @@ async function importPlayersFromExcel(formData: FormData) {
       .map((row, rowIndex) => {
         const playerOne = String(row[0] ?? "").trim();
         const playerTwo = String(row[1] ?? "").trim();
+        const phone = normalizePhone(String(row[2] ?? ""));
 
         if (!playerOne || !playerTwo) {
           return null;
@@ -657,9 +666,15 @@ async function importPlayersFromExcel(formData: FormData) {
         }
 
         seenPairs.add(pairKey);
-        return { fullName: playerOne, partnerName: playerTwo };
+        return {
+          fullName: playerOne,
+          partnerName: playerTwo,
+          phone: phone && isValidPhone(phone) ? phone : "",
+        };
       })
-      .filter((entry): entry is { fullName: string; partnerName: string } => entry !== null);
+      .filter(
+        (entry): entry is { fullName: string; partnerName: string; phone: string } => entry !== null,
+      );
 
     if (entries.length === 0) {
       return;
@@ -670,259 +685,57 @@ async function importPlayersFromExcel(formData: FormData) {
         tournamentId,
         fullName: entry.fullName,
         partnerName: entry.partnerName,
+        phone: entry.phone,
       })),
     });
 
     revalidatePath(`/admin/tournaments/${tournamentId}`);
+    revalidatePath(`/tournaments/${tournamentId}`);
     return;
   }
 
-  const names = rows
+  const seenNames = new Set<string>();
+  const entries = rows
     .map((row, rowIndex) => {
-      const raw = row[0];
-      if (raw === undefined || raw === null) {
-        return "";
-      }
+      const fullName = String(row[0] ?? "").trim();
+      const phone = normalizePhone(String(row[1] ?? ""));
 
-      const value = String(raw).trim();
-      if (!value) {
-        return "";
+      if (!fullName) {
+        return null;
       }
 
       // Skip common header cells when they appear on first row.
-      if (rowIndex === 0 && ["name", "full name", "player", "player name"].includes(value.toLowerCase())) {
-        return "";
+      if (
+        rowIndex === 0 &&
+        ["name", "full name", "player", "player name"].includes(fullName.toLowerCase())
+      ) {
+        return null;
       }
 
-      return value;
-    })
-    .filter((name) => name.length > 0);
+      const nameKey = fullName.toLowerCase();
+      if (seenNames.has(nameKey)) {
+        return null;
+      }
+      seenNames.add(nameKey);
 
-  if (names.length === 0) {
+      return {
+        fullName,
+        phone: phone && isValidPhone(phone) ? phone : "",
+      };
+    })
+    .filter((entry): entry is { fullName: string; phone: string } => entry !== null);
+
+  if (entries.length === 0) {
     return;
   }
 
-  const uniqueNames = [...new Set(names)];
   await prisma.player.createMany({
-    data: uniqueNames.map((fullName) => ({
+    data: entries.map((entry) => ({
       tournamentId,
-      fullName,
+      fullName: entry.fullName,
+      phone: entry.phone,
     })),
   });
-
-  revalidatePath(`/admin/tournaments/${tournamentId}`);
-}
-
-function readOptionalScoreInt(formData: FormData, key: string): number | null {
-  const raw = String(formData.get(key) ?? "").trim();
-  if (!raw) return null;
-  const value = Number.parseInt(raw, 10);
-  return Number.isNaN(value) ? null : value;
-}
-
-async function updateMatchResult(formData: FormData) {
-  "use server";
-
-  const matchId = String(formData.get("matchId") ?? "");
-  const tournamentId = String(formData.get("tournamentId") ?? "");
-  const homePlayerId = String(formData.get("homePlayerId") ?? "");
-  const awayPlayerId = String(formData.get("awayPlayerId") ?? "");
-  const scheduledTimeRaw = String(formData.get("scheduledTime") ?? "").trim();
-  const courtRaw = String(formData.get("court") ?? "").trim();
-
-  if (!matchId || !tournamentId || !homePlayerId || !awayPlayerId) {
-    return;
-  }
-
-  const existingMatch = await prisma.match.findUnique({
-    where: { id: matchId },
-    select: {
-      homeGames: true,
-      awayGames: true,
-      homeSets: true,
-      awaySets: true,
-      set1HomeGames: true,
-      set1AwayGames: true,
-      set2HomeGames: true,
-      set2AwayGames: true,
-      set3HomeGames: true,
-      set3AwayGames: true,
-      winnerId: true,
-    },
-  });
-
-  if (!existingMatch) {
-    return;
-  }
-
-  const tournament = await prisma.tournament.findUnique({
-    where: { id: tournamentId },
-    select: { startsAt: true, matchSetupType: true },
-  });
-
-  if (!tournament) {
-    return;
-  }
-
-  let homeGames = existingMatch.homeGames;
-  let awayGames = existingMatch.awayGames;
-  let homeSets = existingMatch.homeSets;
-  let awaySets = existingMatch.awaySets;
-  let set1HomeGames = existingMatch.set1HomeGames;
-  let set1AwayGames = existingMatch.set1AwayGames;
-  let set2HomeGames = existingMatch.set2HomeGames;
-  let set2AwayGames = existingMatch.set2AwayGames;
-  let set3HomeGames = existingMatch.set3HomeGames;
-  let set3AwayGames = existingMatch.set3AwayGames;
-  let winnerId = existingMatch.winnerId;
-
-  const parsedSet1Home = readOptionalScoreInt(formData, "set1HomeGames");
-  const parsedSet1Away = readOptionalScoreInt(formData, "set1AwayGames");
-  const parsedSet2Home = readOptionalScoreInt(formData, "set2HomeGames");
-  const parsedSet2Away = readOptionalScoreInt(formData, "set2AwayGames");
-  const parsedSet3Home = readOptionalScoreInt(formData, "set3HomeGames");
-  const parsedSet3Away = readOptionalScoreInt(formData, "set3AwayGames");
-
-  const anySetScoreEntered =
-    parsedSet1Home != null ||
-    parsedSet1Away != null ||
-    parsedSet2Home != null ||
-    parsedSet2Away != null ||
-    parsedSet3Home != null ||
-    parsedSet3Away != null;
-
-  if (anySetScoreEntered) {
-    if (parsedSet1Home == null || parsedSet1Away == null) {
-      return;
-    }
-
-    if (
-      (parsedSet2Home == null) !== (parsedSet2Away == null) ||
-      (parsedSet3Home == null) !== (parsedSet3Away == null)
-    ) {
-      return;
-    }
-
-    const set2 =
-      parsedSet2Home != null && parsedSet2Away != null
-        ? { homeGames: parsedSet2Home, awayGames: parsedSet2Away }
-        : null;
-    const set3 =
-      parsedSet3Home != null && parsedSet3Away != null
-        ? { homeGames: parsedSet3Home, awayGames: parsedSet3Away }
-        : null;
-
-    const parsed = parseDetailedMatchSetScores(
-      {
-        set1: { homeGames: parsedSet1Home, awayGames: parsedSet1Away },
-        set2,
-        set3,
-      },
-      tournament.matchSetupType,
-    );
-
-    if (parsed.error) {
-      return;
-    }
-
-    set1HomeGames = parsedSet1Home;
-    set1AwayGames = parsedSet1Away;
-    set2HomeGames = set2?.homeGames ?? null;
-    set2AwayGames = set2?.awayGames ?? null;
-    set3HomeGames = set3?.homeGames ?? null;
-    set3AwayGames = set3?.awayGames ?? null;
-    homeSets = parsed.homeSets;
-    awaySets = parsed.awaySets;
-    homeGames = parsed.homeGamesTotal;
-    awayGames = parsed.awayGamesTotal;
-    winnerId = parsed.homeSets > parsed.awaySets ? homePlayerId : awayPlayerId;
-  }
-
-  const scheduledAt = buildScheduledAt(tournament.startsAt, scheduledTimeRaw);
-  const court = parseCourt(courtRaw);
-
-  await prisma.match.update({
-    where: { id: matchId },
-    data: {
-      homeGames,
-      awayGames,
-      homeSets,
-      awaySets,
-      set1HomeGames,
-      set1AwayGames,
-      set2HomeGames,
-      set2AwayGames,
-      set3HomeGames,
-      set3AwayGames,
-      winnerId,
-      scheduledAt,
-      court,
-    },
-  });
-
-  const updatedMatch = await prisma.match.findUnique({
-    where: { id: matchId },
-    select: { round: true },
-  });
-
-  if (updatedMatch?.round === "Knockout SF1" || updatedMatch?.round === "Knockout SF2") {
-    const sfMatches = await prisma.match.findMany({
-      where: {
-        tournamentId,
-        round: {
-          in: ["Knockout SF1", "Knockout SF2"],
-        },
-      },
-      select: {
-        round: true,
-        winnerId: true,
-      },
-    });
-
-    const sf1 = sfMatches.find((m) => m.round === "Knockout SF1");
-    const sf2 = sfMatches.find((m) => m.round === "Knockout SF2");
-
-    const finalMatch = await prisma.match.findFirst({
-      where: {
-        tournamentId,
-        round: "Knockout Final",
-      },
-      select: { id: true, homePlayerId: true, awayPlayerId: true },
-    });
-
-    if (sf1?.winnerId && sf2?.winnerId && sf1.winnerId !== sf2.winnerId) {
-      if (finalMatch) {
-        const finalistsChanged =
-          finalMatch.homePlayerId !== sf1.winnerId || finalMatch.awayPlayerId !== sf2.winnerId;
-        if (finalistsChanged) {
-          await prisma.match.update({
-            where: { id: finalMatch.id },
-            data: {
-              homePlayerId: sf1.winnerId,
-              awayPlayerId: sf2.winnerId,
-              winnerId: null,
-              homeGames: null,
-              awayGames: null,
-              scheduledAt: null,
-            },
-          });
-        }
-      } else {
-        await prisma.match.create({
-          data: {
-            tournamentId,
-            round: "Knockout Final",
-            homePlayerId: sf1.winnerId,
-            awayPlayerId: sf2.winnerId,
-          },
-        });
-      }
-    } else if (finalMatch) {
-      await prisma.match.delete({
-        where: { id: finalMatch.id },
-      });
-    }
-  }
 
   revalidatePath(`/admin/tournaments/${tournamentId}`);
   revalidatePath(`/tournaments/${tournamentId}`);
@@ -1280,9 +1093,17 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                       placeholder="Stefanos Tsitsipas"
                     />
                   </label>
-                ) : (
-                  <div className="sm:col-span-2" />
-                )}
+                ) : null}
+                <label className="flex flex-col gap-2 sm:col-span-2">
+                  <span className="text-sm text-zinc-700 dark:text-zinc-300">Telephone</span>
+                  <input
+                    name="phone"
+                    type="tel"
+                    required
+                    className="rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-500 dark:border-white/20"
+                    placeholder="99 123456"
+                  />
+                </label>
                 <div className="sm:col-span-4">
                   <button
                     type="submit"
@@ -1301,7 +1122,9 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                 <label className="flex flex-col gap-2 sm:col-span-3">
                   <span className="text-sm text-zinc-700 dark:text-zinc-300">
                     Import {entryLabelLower} from Excel (.xlsx, .xls)
-                    {isDoubles ? " — column A: player 1, column B: player 2" : ""}
+                    {isDoubles
+                      ? " — column A: player 1, column B: player 2, column C: telephone"
+                      : " — column A: name, column B: telephone"}
                   </span>
                   <input
                     type="file"
@@ -1327,11 +1150,12 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                 </p>
               ) : (
                 <div className="mt-4 overflow-x-auto">
-                  <table className="w-full min-w-[640px] text-left text-sm">
+                  <table className="w-full min-w-[720px] text-left text-sm">
                     <thead className="border-b border-black/10 dark:border-white/10">
                       <tr>
                         <th className="px-2 py-2 font-medium">{isDoubles ? "Player 1" : "Name"}</th>
                         {isDoubles && <th className="px-2 py-2 font-medium">Player 2</th>}
+                        <th className="px-2 py-2 font-medium">Telephone</th>
                         {tournament.format === TournamentFormat.ROUND_ROBIN_AND_KNOCKOUT && (
                           <th className="px-2 py-2 font-medium">Group</th>
                         )}
@@ -1346,6 +1170,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                             tournamentId={tournament.id}
                             initialFullName={player.fullName}
                             initialPartnerName={player.partnerName}
+                            initialPhone={player.phone}
                             initialGroupNumber={player.groupNumber}
                             groupCount={tournament.groupCount}
                             showGroup={tournament.format === TournamentFormat.ROUND_ROBIN_AND_KNOCKOUT}
@@ -1458,6 +1283,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                 initialSet3AwayGames={match.set3AwayGames}
                                 updateMatchResult={updateMatchResult}
                                 useSetsScoring={useSetsScoring}
+                                submitLabel="Save / Correct"
                               />
                             </td>
                           </tr>
@@ -1631,6 +1457,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                               updateMatchResult={updateMatchResult}
                                               useSetsScoring={useSetsScoring}
                                               compact
+                                              submitLabel="Save / Correct"
                                             />
                                           </td>
                                           <td className="px-2 py-2 hidden sm:table-cell">
