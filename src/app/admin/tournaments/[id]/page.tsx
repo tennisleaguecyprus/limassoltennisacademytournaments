@@ -1553,6 +1553,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                     <th className="px-2 py-2">P</th>
                                     <th className="px-2 py-2">GW</th>
                                     <th className="px-2 py-2">GL</th>
+                                    <th className="px-2 py-2">Diff</th>
                                     <th className="px-2 py-2">Set Points</th>
                                   </tr>
                                 </thead>
@@ -1567,6 +1568,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                       <td className="px-2 py-2">{row.played}</td>
                                       <td className="px-2 py-2">{row.gamesWon}</td>
                                       <td className="px-2 py-2">{row.gamesLost}</td>
+                                      <td className="px-2 py-2">{row.gamesWon - row.gamesLost}</td>
                                       <td className="px-2 py-2">{row.gamePoints}</td>
                                     </tr>
                                   ))}

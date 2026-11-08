@@ -243,10 +243,14 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                   #{index + 1}
                                 </span>
                               </div>
-                              <div className="mt-3 grid grid-cols-4 gap-2 text-[11px]">
+                              <div className="mt-3 grid grid-cols-5 gap-2 text-[11px]">
                                 <p><span className="text-zinc-500 dark:text-zinc-400">P</span> {row.played}</p>
                                 <p><span className="text-zinc-500 dark:text-zinc-400">GW</span> {row.gamesWon}</p>
                                 <p><span className="text-zinc-500 dark:text-zinc-400">GL</span> {row.gamesLost}</p>
+                                <p>
+                                  <span className="text-zinc-500 dark:text-zinc-400">Diff</span>{" "}
+                                  {row.gamesWon - row.gamesLost}
+                                </p>
                                 <p>
                                   <span className="text-zinc-500 dark:text-zinc-400">Set Points</span>{" "}
                                   {row.gamePoints}
@@ -265,6 +269,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                 <th className="px-2 py-2">P</th>
                                 <th className="px-2 py-2">GW</th>
                                 <th className="px-2 py-2">GL</th>
+                                <th className="px-2 py-2">Diff</th>
                                 <th className="px-2 py-2">Set Points</th>
                               </tr>
                             </thead>
@@ -279,6 +284,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                   <td className="px-2 py-2">{row.played}</td>
                                   <td className="px-2 py-2">{row.gamesWon}</td>
                                   <td className="px-2 py-2">{row.gamesLost}</td>
+                                  <td className="px-2 py-2">{row.gamesWon - row.gamesLost}</td>
                                   <td className="px-2 py-2">{row.gamePoints}</td>
                                 </tr>
                               ))}
