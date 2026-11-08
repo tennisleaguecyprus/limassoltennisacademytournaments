@@ -12,13 +12,25 @@ import { sortStandingRows, type StandingRow } from "@/lib/tournament-standings";
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ phase?: string }>;
+  searchParams?: Promise<{ phase?: string; group?: string }>;
 };
 
 function resolveActivePhase(phase: string | undefined) {
   if (phase === "knockout") return "knockout";
   if (phase === "entries") return "entries";
   return "group";
+}
+
+function resolveActiveGroupNumber(
+  groupParam: string | undefined,
+  groupNumbers: number[],
+): number | null {
+  if (groupNumbers.length === 0) return null;
+  const parsed = groupParam ? Number.parseInt(groupParam, 10) : Number.NaN;
+  if (!Number.isNaN(parsed) && groupNumbers.includes(parsed)) {
+    return parsed;
+  }
+  return groupNumbers[0];
 }
 
 function formatKnockoutRound(round: string) {
@@ -45,6 +57,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
   const { id } = await params;
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const activePhase = resolveActivePhase(resolvedSearchParams?.phase);
+  const requestedGroup = resolvedSearchParams?.group;
 
   const tournament = await prisma.tournament.findUnique({
     where: { id },
@@ -140,6 +153,12 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
   const tournamentStatus =
     now < tournament.startsAt ? "Upcoming" : now > tournament.endsAt ? "Completed" : "Live";
   const isDoubles = tournament.eventType === EventType.DOUBLES;
+  const groupNumbers = [...standingsByGroup.keys()].sort((a, b) => a - b);
+  const activeGroupNumber = resolveActiveGroupNumber(requestedGroup, groupNumbers);
+  const activeGroupRows =
+    activeGroupNumber == null ? null : (standingsByGroup.get(activeGroupNumber) ?? null);
+  const activeGroupMatches =
+    activeGroupNumber == null ? [] : (groupMatchesByGroup.get(activeGroupNumber) ?? []);
   const knockoutMatches = tournament.matches
     .filter((match) => !match.round.startsWith("Group "))
     .sort((a, b) => {
@@ -195,7 +214,9 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
               Entry List
             </Link>
             <Link
-              href={`/tournaments/${tournament.id}?phase=group`}
+              href={`/tournaments/${tournament.id}?phase=group${
+                activeGroupNumber ? `&group=${activeGroupNumber}` : ""
+              }`}
               className={`rounded-md px-3 py-2 text-center text-sm ${
                 activePhase === "group"
                   ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
@@ -301,183 +322,196 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                 <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
                   Group Phase is not used for this Tournament format.
                 </p>
-              ) : standingsByGroup.size === 0 ? (
+              ) : standingsByGroup.size === 0 || activeGroupNumber == null || !activeGroupRows ? (
                 <p className="mt-3 text-sm text-zinc-600 dark:text-zinc-300">
                   Standings will appear once players are assigned to groups.
                 </p>
               ) : (
-                <div className="mt-4 grid gap-4">
-                  {[...standingsByGroup.entries()]
-                    .sort(([a], [b]) => a - b)
-                    .map(([groupNumber, rows]) => (
-                      <div
-                        key={groupNumber}
-                        className="rounded-xl border border-black/10 bg-gradient-to-br from-white to-zinc-50 p-3 shadow-sm dark:border-white/10 dark:from-zinc-950 dark:to-zinc-900 sm:p-4"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-semibold sm:text-base">Group {groupNumber}</p>
-                          <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
-                            Standings
-                          </span>
-                        </div>
+                <div className="mt-4">
+                  {groupNumbers.length > 1 && (
+                    <div className="mb-4 flex flex-wrap gap-2">
+                      {groupNumbers.map((groupNumber) => (
+                        <Link
+                          key={groupNumber}
+                          href={`/tournaments/${tournament.id}?phase=group&group=${groupNumber}`}
+                          className={`rounded-md px-3 py-2 text-sm ${
+                            activeGroupNumber === groupNumber
+                              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                              : "border border-black/10 hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"
+                          }`}
+                        >
+                          Group {groupNumber}
+                        </Link>
+                      ))}
+                    </div>
+                  )}
 
-                        <div className="mt-3 space-y-2 sm:hidden">
-                          {rows.map((row, index) => (
-                            <article
-                              key={`${row.playerId}-mobile-standing`}
-                              className="rounded-lg border border-black/10 bg-white p-3 dark:border-white/10 dark:bg-zinc-950"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="text-sm font-semibold">{row.playerName}</p>
-                                <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
-                                  #{index + 1}
-                                </span>
-                              </div>
-                              <div className="mt-3 grid grid-cols-5 gap-2 text-[11px]">
-                                <p><span className="text-zinc-500 dark:text-zinc-400">P</span> {row.played}</p>
-                                <p><span className="text-zinc-500 dark:text-zinc-400">GW</span> {row.gamesWon}</p>
-                                <p><span className="text-zinc-500 dark:text-zinc-400">GL</span> {row.gamesLost}</p>
-                                <p>
-                                  <span className="text-zinc-500 dark:text-zinc-400">Diff</span>{" "}
-                                  {row.gamesWon - row.gamesLost}
-                                </p>
-                                <p>
-                                  <span className="text-zinc-500 dark:text-zinc-400">Set Points</span>{" "}
-                                  {row.gamePoints}
-                                </p>
-                              </div>
-                            </article>
-                          ))}
-                        </div>
+                  <div className="rounded-xl border border-black/10 bg-gradient-to-br from-white to-zinc-50 p-3 shadow-sm dark:border-white/10 dark:from-zinc-950 dark:to-zinc-900 sm:p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold sm:text-base">
+                        Group {activeGroupNumber}
+                      </p>
+                      <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                        Standings
+                      </span>
+                    </div>
 
-                        <div className="mt-2 hidden overflow-x-auto sm:block">
-                          <table className="w-full min-w-[700px] text-left text-xs">
-                            <thead className="border-b border-black/10 dark:border-white/10">
-                              <tr>
-                                <th className="px-2 py-2">#</th>
-                                <th className="px-2 py-2">{isDoubles ? "Pair" : "Player"}</th>
-                                <th className="px-2 py-2">P</th>
-                                <th className="px-2 py-2">GW</th>
-                                <th className="px-2 py-2">GL</th>
-                                <th className="px-2 py-2">Diff</th>
-                                <th className="px-2 py-2">Set Points</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rows.map((row, index) => (
-                                <tr
-                                  key={row.playerId}
-                                  className="border-b border-black/5 dark:border-white/10"
-                                >
-                                  <td className="px-2 py-2">{index + 1}</td>
-                                  <td className="px-2 py-2">{row.playerName}</td>
-                                  <td className="px-2 py-2">{row.played}</td>
-                                  <td className="px-2 py-2">{row.gamesWon}</td>
-                                  <td className="px-2 py-2">{row.gamesLost}</td>
-                                  <td className="px-2 py-2">{row.gamesWon - row.gamesLost}</td>
-                                  <td className="px-2 py-2">{row.gamePoints}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        <div className="mt-4">
-                          <p className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                            Group {groupNumber} Matches
-                          </p>
-                          {(groupMatchesByGroup.get(groupNumber) ?? []).length === 0 ? (
-                            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
-                              No matches yet for this group.
+                    <div className="mt-3 space-y-2 sm:hidden">
+                      {activeGroupRows.map((row, index) => (
+                        <article
+                          key={`${row.playerId}-mobile-standing`}
+                          className="rounded-lg border border-black/10 bg-white p-3 dark:border-white/10 dark:bg-zinc-950"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <p className="text-sm font-semibold">{row.playerName}</p>
+                            <span className="rounded-full bg-zinc-900 px-2 py-1 text-[11px] font-medium text-white dark:bg-zinc-100 dark:text-zinc-900">
+                              #{index + 1}
+                            </span>
+                          </div>
+                          <div className="mt-3 grid grid-cols-5 gap-2 text-[11px]">
+                            <p><span className="text-zinc-500 dark:text-zinc-400">P</span> {row.played}</p>
+                            <p><span className="text-zinc-500 dark:text-zinc-400">GW</span> {row.gamesWon}</p>
+                            <p><span className="text-zinc-500 dark:text-zinc-400">GL</span> {row.gamesLost}</p>
+                            <p>
+                              <span className="text-zinc-500 dark:text-zinc-400">Diff</span>{" "}
+                              {row.gamesWon - row.gamesLost}
                             </p>
-                          ) : (
-                            <>
-                              <div className="mt-2 space-y-2 sm:hidden">
-                                {(groupMatchesByGroup.get(groupNumber) ?? []).map((match) => (
-                                  <article
-                                    key={`${match.id}-mobile-match`}
-                                    className="rounded-lg border border-black/10 bg-white p-3 dark:border-white/10 dark:bg-zinc-950"
+                            <p>
+                              <span className="text-zinc-500 dark:text-zinc-400">Set Points</span>{" "}
+                              {row.gamePoints}
+                            </p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+
+                    <div className="mt-2 hidden overflow-x-auto sm:block">
+                      <table className="w-full min-w-[700px] text-left text-xs">
+                        <thead className="border-b border-black/10 dark:border-white/10">
+                          <tr>
+                            <th className="px-2 py-2">#</th>
+                            <th className="px-2 py-2">{isDoubles ? "Pair" : "Player"}</th>
+                            <th className="px-2 py-2">P</th>
+                            <th className="px-2 py-2">GW</th>
+                            <th className="px-2 py-2">GL</th>
+                            <th className="px-2 py-2">Diff</th>
+                            <th className="px-2 py-2">Set Points</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {activeGroupRows.map((row, index) => (
+                            <tr
+                              key={row.playerId}
+                              className="border-b border-black/5 dark:border-white/10"
+                            >
+                              <td className="px-2 py-2">{index + 1}</td>
+                              <td className="px-2 py-2">{row.playerName}</td>
+                              <td className="px-2 py-2">{row.played}</td>
+                              <td className="px-2 py-2">{row.gamesWon}</td>
+                              <td className="px-2 py-2">{row.gamesLost}</td>
+                              <td className="px-2 py-2">{row.gamesWon - row.gamesLost}</td>
+                              <td className="px-2 py-2">{row.gamePoints}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="mt-4">
+                      <p className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                        Group {activeGroupNumber} Matches
+                      </p>
+                      {activeGroupMatches.length === 0 ? (
+                        <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+                          No matches yet for this group.
+                        </p>
+                      ) : (
+                        <>
+                          <div className="mt-2 space-y-2 sm:hidden">
+                            {activeGroupMatches.map((match) => (
+                              <article
+                                key={`${match.id}-mobile-match`}
+                                className="rounded-lg border border-black/10 bg-white p-3 dark:border-white/10 dark:bg-zinc-950"
+                              >
+                                <p className="text-xs font-semibold">
+                                  {formatEntryVersus(
+                                    match.homePlayer,
+                                    match.awayPlayer,
+                                    tournament.eventType,
+                                  )}
+                                </p>
+                                <div className="mt-2">
+                                  <PublicMatchScoreEditor
+                                    match={match}
+                                    tournamentId={tournament.id}
+                                    matchSetupType={tournament.matchSetupType}
+                                  />
+                                </div>
+                                <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
+                                  Schedule:{" "}
+                                  {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
+                                </p>
+                                <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
+                                  Winner:{" "}
+                                  {match.winnerId === match.homePlayerId
+                                    ? formatEntryName(match.homePlayer, tournament.eventType)
+                                    : match.winnerId === match.awayPlayerId
+                                      ? formatEntryName(match.awayPlayer, tournament.eventType)
+                                      : "-"}
+                                </p>
+                              </article>
+                            ))}
+                          </div>
+
+                          <div className="mt-2 hidden overflow-x-auto sm:block">
+                            <table className="w-full min-w-[700px] text-left text-xs">
+                              <thead className="border-b border-black/10 dark:border-white/10">
+                                <tr>
+                                  <th className="px-2 py-2 font-medium">Home</th>
+                                  <th className="px-2 py-2 font-medium">Away</th>
+                                  <th className="px-2 py-2 font-medium">Schedule</th>
+                                  <th className="px-2 py-2 font-medium">Score / Update</th>
+                                  <th className="px-2 py-2 font-medium">Winner</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {activeGroupMatches.map((match) => (
+                                  <tr
+                                    key={match.id}
+                                    className="border-b border-black/5 dark:border-white/10"
                                   >
-                                    <p className="text-xs font-semibold">
-                                      {formatEntryVersus(
-                                        match.homePlayer,
-                                        match.awayPlayer,
-                                        tournament.eventType,
-                                      )}
-                                    </p>
-                                    <div className="mt-2">
+                                    <td className="px-2 py-2">
+                                      {formatEntryName(match.homePlayer, tournament.eventType)}
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      {formatEntryName(match.awayPlayer, tournament.eventType)}
+                                    </td>
+                                    <td className="px-2 py-2">
+                                      {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
+                                    </td>
+                                    <td className="px-2 py-2">
                                       <PublicMatchScoreEditor
                                         match={match}
                                         tournamentId={tournament.id}
                                         matchSetupType={tournament.matchSetupType}
                                       />
-                                    </div>
-                                    <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
-                                      Schedule:{" "}
-                                      {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
-                                    </p>
-                                    <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
-                                      Winner:{" "}
+                                    </td>
+                                    <td className="px-2 py-2">
                                       {match.winnerId === match.homePlayerId
                                         ? formatEntryName(match.homePlayer, tournament.eventType)
                                         : match.winnerId === match.awayPlayerId
                                           ? formatEntryName(match.awayPlayer, tournament.eventType)
                                           : "-"}
-                                    </p>
-                                  </article>
-                                ))}
-                              </div>
-
-                              <div className="mt-2 hidden overflow-x-auto sm:block">
-                                <table className="w-full min-w-[700px] text-left text-xs">
-                                <thead className="border-b border-black/10 dark:border-white/10">
-                                  <tr>
-                                    <th className="px-2 py-2 font-medium">Home</th>
-                                    <th className="px-2 py-2 font-medium">Away</th>
-                                    <th className="px-2 py-2 font-medium">Schedule</th>
-                                    <th className="px-2 py-2 font-medium">Score / Update</th>
-                                    <th className="px-2 py-2 font-medium">Winner</th>
+                                    </td>
                                   </tr>
-                                </thead>
-                                <tbody>
-                                  {(groupMatchesByGroup.get(groupNumber) ?? []).map((match) => (
-                                    <tr
-                                      key={match.id}
-                                      className="border-b border-black/5 dark:border-white/10"
-                                    >
-                                      <td className="px-2 py-2">
-                                        {formatEntryName(match.homePlayer, tournament.eventType)}
-                                      </td>
-                                      <td className="px-2 py-2">
-                                        {formatEntryName(match.awayPlayer, tournament.eventType)}
-                                      </td>
-                                      <td className="px-2 py-2">
-                                        {formatMatchScheduleDisplay(match.scheduledAt, match.court)}
-                                      </td>
-                                      <td className="px-2 py-2">
-                                        <PublicMatchScoreEditor
-                                          match={match}
-                                          tournamentId={tournament.id}
-                                          matchSetupType={tournament.matchSetupType}
-                                        />
-                                      </td>
-                                      <td className="px-2 py-2">
-                                        {match.winnerId === match.homePlayerId
-                                          ? formatEntryName(match.homePlayer, tournament.eventType)
-                                          : match.winnerId === match.awayPlayerId
-                                            ? formatEntryName(match.awayPlayer, tournament.eventType)
-                                            : "-"}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                                </table>
-                              </div>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
               )}
             </>
