@@ -67,19 +67,27 @@ model Player {
 }
 
 model Match {
-  id             String      @id @default(cuid())
-  round          String
-  scheduledAt    DateTime?
-  court          Int?
-  winnerId       String?
-  homeGames      Int?
-  awayGames      Int?
-  tournamentId   String
-  homePlayerId   String
-  awayPlayerId   String
-  tournament     Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
-  homePlayer     Player      @relation("home_player", fields: [homePlayerId], references: [id], onDelete: Restrict)
-  awayPlayer     Player      @relation("away_player", fields: [awayPlayerId], references: [id], onDelete: Restrict)
+  id              String      @id @default(cuid())
+  round           String
+  scheduledAt     DateTime?
+  court           Int?
+  winnerId        String?
+  homeGames       Int?
+  awayGames       Int?
+  homeSets        Int?
+  awaySets        Int?
+  set1HomeGames   Int?
+  set1AwayGames   Int?
+  set2HomeGames   Int?
+  set2AwayGames   Int?
+  set3HomeGames   Int?
+  set3AwayGames   Int?
+  tournamentId    String
+  homePlayerId    String
+  awayPlayerId    String
+  tournament      Tournament  @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  homePlayer      Player      @relation("home_player", fields: [homePlayerId], references: [id], onDelete: Restrict)
+  awayPlayer      Player      @relation("away_player", fields: [awayPlayerId], references: [id], onDelete: Restrict)
 }
 
 enum LadderStatus {

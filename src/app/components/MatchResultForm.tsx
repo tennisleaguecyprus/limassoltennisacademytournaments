@@ -11,6 +11,12 @@ type MatchResultFormProps = {
   initialCourt: number | null;
   initialHomeGames: number | null;
   initialAwayGames: number | null;
+  initialSet1HomeGames?: number | null;
+  initialSet1AwayGames?: number | null;
+  initialSet2HomeGames?: number | null;
+  initialSet2AwayGames?: number | null;
+  initialSet3HomeGames?: number | null;
+  initialSet3AwayGames?: number | null;
   updateMatchResult: (formData: FormData) => Promise<void>;
   scoreInputLabel?: string;
   useSetsScoring?: boolean;
@@ -24,17 +30,23 @@ export default function MatchResultForm({
   awayPlayerId,
   initialScheduledAt,
   initialCourt,
-  initialHomeGames,
-  initialAwayGames,
+  initialSet1HomeGames = null,
+  initialSet1AwayGames = null,
+  initialSet2HomeGames = null,
+  initialSet2AwayGames = null,
+  initialSet3HomeGames = null,
+  initialSet3AwayGames = null,
   updateMatchResult,
-  scoreInputLabel = "Games",
-  useSetsScoring = false,
   compact = false,
 }: MatchResultFormProps) {
+  const inputClass = `rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20 ${
+    compact ? "w-12" : "w-14"
+  }`;
+
   return (
     <form
       action={updateMatchResult}
-      className={`flex flex-wrap items-center gap-2 ${compact ? "" : ""}`}
+      className="flex flex-wrap items-center gap-2"
     >
       <input type="hidden" name="matchId" value={matchId} />
       <input type="hidden" name="tournamentId" value={tournamentId} />
@@ -62,35 +74,78 @@ export default function MatchResultForm({
           <option value="3">Court 3</option>
         </select>
       </label>
+
+      <span className="text-[10px] text-zinc-500">S1</span>
       <input
-        name="homeGames"
+        name="set1HomeGames"
         type="number"
         min={0}
-        max={useSetsScoring ? 2 : undefined}
-        placeholder={useSetsScoring ? "S" : "H"}
-        title={
-          useSetsScoring
-            ? "Sets won (valid: 2-0, 2-1, 1-2, 0-2)"
-            : `${scoreInputLabel} won (home)`
-        }
-        defaultValue={initialHomeGames ?? ""}
-        className={`rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20 ${compact ? "w-14" : "w-16"}`}
+        max={20}
+        required
+        placeholder="H"
+        title="Set 1 home games"
+        defaultValue={initialSet1HomeGames ?? ""}
+        className={inputClass}
       />
       <span className="text-xs">-</span>
       <input
-        name="awayGames"
+        name="set1AwayGames"
         type="number"
         min={0}
-        max={useSetsScoring ? 2 : undefined}
-        placeholder={useSetsScoring ? "S" : "A"}
-        title={
-          useSetsScoring
-            ? "Sets won (valid: 2-0, 2-1, 1-2, 0-2)"
-            : `${scoreInputLabel} won (away)`
-        }
-        defaultValue={initialAwayGames ?? ""}
-        className={`rounded-md border border-black/15 px-2 py-1 text-xs dark:border-white/20 ${compact ? "w-14" : "w-16"}`}
+        max={20}
+        required
+        placeholder="A"
+        title="Set 1 away games"
+        defaultValue={initialSet1AwayGames ?? ""}
+        className={inputClass}
       />
+
+      <span className="text-[10px] text-zinc-500">S2</span>
+      <input
+        name="set2HomeGames"
+        type="number"
+        min={0}
+        max={20}
+        placeholder="H"
+        title="Set 2 home games (optional for 1-set matches)"
+        defaultValue={initialSet2HomeGames ?? ""}
+        className={inputClass}
+      />
+      <span className="text-xs">-</span>
+      <input
+        name="set2AwayGames"
+        type="number"
+        min={0}
+        max={20}
+        placeholder="A"
+        title="Set 2 away games"
+        defaultValue={initialSet2AwayGames ?? ""}
+        className={inputClass}
+      />
+
+      <span className="text-[10px] text-zinc-500">S3</span>
+      <input
+        name="set3HomeGames"
+        type="number"
+        min={0}
+        max={20}
+        placeholder="H"
+        title="Set 3 / super TB (only if 1-1)"
+        defaultValue={initialSet3HomeGames ?? ""}
+        className={inputClass}
+      />
+      <span className="text-xs">-</span>
+      <input
+        name="set3AwayGames"
+        type="number"
+        min={0}
+        max={20}
+        placeholder="A"
+        title="Set 3 / super TB away"
+        defaultValue={initialSet3AwayGames ?? ""}
+        className={inputClass}
+      />
+
       <button
         type="submit"
         className="rounded-md border border-black/15 px-2 py-1 text-xs hover:bg-black/5 dark:border-white/20 dark:hover:bg-white/10"

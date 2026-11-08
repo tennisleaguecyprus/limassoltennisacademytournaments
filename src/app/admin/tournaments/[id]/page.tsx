@@ -12,10 +12,11 @@ import { buildScheduledAt, formatMatchScheduleDisplay, parseCourt } from "@/lib/
 import {
   formatMatchScoreDisplay,
   formatMatchSetupLabel,
+  getMatchStandingContribution,
   isBestOfThreeSuperTiebreak,
+  parseDetailedMatchSetScores,
   parseMatchSetupType,
   resolveNumberOfSets,
-  validateMatchScoreForSave,
 } from "@/lib/match-setup";
 import { prisma } from "@/lib/prisma";
 import {
@@ -712,6 +713,13 @@ async function importPlayersFromExcel(formData: FormData) {
   revalidatePath(`/admin/tournaments/${tournamentId}`);
 }
 
+function readOptionalScoreInt(formData: FormData, key: string): number | null {
+  const raw = String(formData.get(key) ?? "").trim();
+  if (!raw) return null;
+  const value = Number.parseInt(raw, 10);
+  return Number.isNaN(value) ? null : value;
+}
+
 async function updateMatchResult(formData: FormData) {
   "use server";
 
@@ -719,8 +727,6 @@ async function updateMatchResult(formData: FormData) {
   const tournamentId = String(formData.get("tournamentId") ?? "");
   const homePlayerId = String(formData.get("homePlayerId") ?? "");
   const awayPlayerId = String(formData.get("awayPlayerId") ?? "");
-  const homeGamesRaw = String(formData.get("homeGames") ?? "").trim();
-  const awayGamesRaw = String(formData.get("awayGames") ?? "").trim();
   const scheduledTimeRaw = String(formData.get("scheduledTime") ?? "").trim();
   const courtRaw = String(formData.get("court") ?? "").trim();
 
@@ -733,6 +739,14 @@ async function updateMatchResult(formData: FormData) {
     select: {
       homeGames: true,
       awayGames: true,
+      homeSets: true,
+      awaySets: true,
+      set1HomeGames: true,
+      set1AwayGames: true,
+      set2HomeGames: true,
+      set2AwayGames: true,
+      set3HomeGames: true,
+      set3AwayGames: true,
       winnerId: true,
     },
   });
@@ -752,31 +766,76 @@ async function updateMatchResult(formData: FormData) {
 
   let homeGames = existingMatch.homeGames;
   let awayGames = existingMatch.awayGames;
+  let homeSets = existingMatch.homeSets;
+  let awaySets = existingMatch.awaySets;
+  let set1HomeGames = existingMatch.set1HomeGames;
+  let set1AwayGames = existingMatch.set1AwayGames;
+  let set2HomeGames = existingMatch.set2HomeGames;
+  let set2AwayGames = existingMatch.set2AwayGames;
+  let set3HomeGames = existingMatch.set3HomeGames;
+  let set3AwayGames = existingMatch.set3AwayGames;
   let winnerId = existingMatch.winnerId;
 
-  const hasHomeScore = homeGamesRaw.length > 0;
-  const hasAwayScore = awayGamesRaw.length > 0;
+  const parsedSet1Home = readOptionalScoreInt(formData, "set1HomeGames");
+  const parsedSet1Away = readOptionalScoreInt(formData, "set1AwayGames");
+  const parsedSet2Home = readOptionalScoreInt(formData, "set2HomeGames");
+  const parsedSet2Away = readOptionalScoreInt(formData, "set2AwayGames");
+  const parsedSet3Home = readOptionalScoreInt(formData, "set3HomeGames");
+  const parsedSet3Away = readOptionalScoreInt(formData, "set3AwayGames");
 
-  if (hasHomeScore || hasAwayScore) {
-    if (!hasHomeScore || !hasAwayScore) {
+  const anySetScoreEntered =
+    parsedSet1Home != null ||
+    parsedSet1Away != null ||
+    parsedSet2Home != null ||
+    parsedSet2Away != null ||
+    parsedSet3Home != null ||
+    parsedSet3Away != null;
+
+  if (anySetScoreEntered) {
+    if (parsedSet1Home == null || parsedSet1Away == null) {
       return;
     }
 
-    const parsedHome = Number.parseInt(homeGamesRaw, 10);
-    const parsedAway = Number.parseInt(awayGamesRaw, 10);
-
-    if (Number.isNaN(parsedHome) || Number.isNaN(parsedAway) || parsedHome < 0 || parsedAway < 0) {
+    if (
+      (parsedSet2Home == null) !== (parsedSet2Away == null) ||
+      (parsedSet3Home == null) !== (parsedSet3Away == null)
+    ) {
       return;
     }
 
-    if (!validateMatchScoreForSave(parsedHome, parsedAway, tournament.matchSetupType)) {
+    const set2 =
+      parsedSet2Home != null && parsedSet2Away != null
+        ? { homeGames: parsedSet2Home, awayGames: parsedSet2Away }
+        : null;
+    const set3 =
+      parsedSet3Home != null && parsedSet3Away != null
+        ? { homeGames: parsedSet3Home, awayGames: parsedSet3Away }
+        : null;
+
+    const parsed = parseDetailedMatchSetScores(
+      {
+        set1: { homeGames: parsedSet1Home, awayGames: parsedSet1Away },
+        set2,
+        set3,
+      },
+      tournament.matchSetupType,
+    );
+
+    if (parsed.error) {
       return;
     }
 
-    homeGames = parsedHome;
-    awayGames = parsedAway;
-    winnerId =
-      homeGames !== awayGames ? (homeGames > awayGames ? homePlayerId : awayPlayerId) : null;
+    set1HomeGames = parsedSet1Home;
+    set1AwayGames = parsedSet1Away;
+    set2HomeGames = set2?.homeGames ?? null;
+    set2AwayGames = set2?.awayGames ?? null;
+    set3HomeGames = set3?.homeGames ?? null;
+    set3AwayGames = set3?.awayGames ?? null;
+    homeSets = parsed.homeSets;
+    awaySets = parsed.awaySets;
+    homeGames = parsed.homeGamesTotal;
+    awayGames = parsed.awayGamesTotal;
+    winnerId = parsed.homeSets > parsed.awaySets ? homePlayerId : awayPlayerId;
   }
 
   const scheduledAt = buildScheduledAt(tournament.startsAt, scheduledTimeRaw);
@@ -787,6 +846,14 @@ async function updateMatchResult(formData: FormData) {
     data: {
       homeGames,
       awayGames,
+      homeSets,
+      awaySets,
+      set1HomeGames,
+      set1AwayGames,
+      set2HomeGames,
+      set2AwayGames,
+      set3HomeGames,
+      set3AwayGames,
       winnerId,
       scheduledAt,
       court,
@@ -922,25 +989,24 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
       const home = rows.get(match.homePlayerId);
       const away = rows.get(match.awayPlayerId);
       if (!home || !away) continue;
-      if (match.homeGames === null || match.homeGames === undefined) continue;
-      if (match.awayGames === null || match.awayGames === undefined) continue;
+
+      const contribution = getMatchStandingContribution(match, tournament.matchSetupType);
+      if (!contribution) continue;
 
       home.played += 1;
       away.played += 1;
-      home.gamesWon += match.homeGames;
-      home.gamesLost += match.awayGames;
-      away.gamesWon += match.awayGames;
-      away.gamesLost += match.homeGames;
+      home.gamesWon += contribution.homeGamesForStandings;
+      home.gamesLost += contribution.awayGamesForStandings;
+      away.gamesWon += contribution.awayGamesForStandings;
+      away.gamesLost += contribution.homeGamesForStandings;
 
-      if (tournament.standingsUseGamePoints) {
-        home.gamePoints += match.homeGames;
-        away.gamePoints += match.awayGames;
-      }
+      home.gamePoints += contribution.homePoints;
+      away.gamePoints += contribution.awayPoints;
 
-      if (match.homeGames > match.awayGames) {
+      if (contribution.homeWon) {
         home.wins += 1;
         away.losses += 1;
-      } else if (match.awayGames > match.homeGames) {
+      } else if (contribution.awayWon) {
         away.wins += 1;
         home.losses += 1;
       }
@@ -1384,6 +1450,12 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                 initialCourt={match.court}
                                 initialHomeGames={match.homeGames}
                                 initialAwayGames={match.awayGames}
+                                initialSet1HomeGames={match.set1HomeGames}
+                                initialSet1AwayGames={match.set1AwayGames}
+                                initialSet2HomeGames={match.set2HomeGames}
+                                initialSet2AwayGames={match.set2AwayGames}
+                                initialSet3HomeGames={match.set3HomeGames}
+                                initialSet3AwayGames={match.set3AwayGames}
                                 updateMatchResult={updateMatchResult}
                                 useSetsScoring={useSetsScoring}
                               />
@@ -1479,18 +1551,9 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                     <th className="px-2 py-2">#</th>
                                     <th className="px-2 py-2">{isDoubles ? "Pair" : "Player"}</th>
                                     <th className="px-2 py-2">P</th>
-                                    <th className="px-2 py-2">W</th>
-                                    <th className="px-2 py-2">L</th>
-                                    <th className="px-2 py-2 hidden sm:table-cell">
-                                      {useSetsScoring ? "SW" : "GW"}
-                                    </th>
-                                    <th className="px-2 py-2 hidden sm:table-cell">
-                                      {useSetsScoring ? "SL" : "GL"}
-                                    </th>
-                                    <th className="px-2 py-2 hidden sm:table-cell">Diff</th>
-                                    <th className="px-2 py-2 hidden sm:table-cell">
-                                      {useSetsScoring ? "Set Points" : "Game Points"}
-                                    </th>
+                                    <th className="px-2 py-2">GW</th>
+                                    <th className="px-2 py-2">GL</th>
+                                    <th className="px-2 py-2">Set Points</th>
                                   </tr>
                                 </thead>
                                 <tbody>
@@ -1502,12 +1565,9 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                       <td className="px-2 py-2">{index + 1}</td>
                                       <td className="px-2 py-2">{row.playerName}</td>
                                       <td className="px-2 py-2">{row.played}</td>
-                                      <td className="px-2 py-2">{row.wins}</td>
-                                      <td className="px-2 py-2">{row.losses}</td>
-                                      <td className="px-2 py-2 hidden sm:table-cell">{row.gamesWon}</td>
-                                      <td className="px-2 py-2 hidden sm:table-cell">{row.gamesLost}</td>
-                                      <td className="px-2 py-2 hidden sm:table-cell">{row.gamesWon - row.gamesLost}</td>
-                                      <td className="px-2 py-2 hidden sm:table-cell">{row.gamePoints}</td>
+                                      <td className="px-2 py-2">{row.gamesWon}</td>
+                                      <td className="px-2 py-2">{row.gamesLost}</td>
+                                      <td className="px-2 py-2">{row.gamePoints}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -1560,6 +1620,12 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                               initialCourt={match.court}
                                               initialHomeGames={match.homeGames}
                                               initialAwayGames={match.awayGames}
+                                              initialSet1HomeGames={match.set1HomeGames}
+                                              initialSet1AwayGames={match.set1AwayGames}
+                                              initialSet2HomeGames={match.set2HomeGames}
+                                              initialSet2AwayGames={match.set2AwayGames}
+                                              initialSet3HomeGames={match.set3HomeGames}
+                                              initialSet3AwayGames={match.set3AwayGames}
                                               updateMatchResult={updateMatchResult}
                                               useSetsScoring={useSetsScoring}
                                               compact
@@ -1570,6 +1636,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                               match.homeGames,
                                               match.awayGames,
                                               tournament.matchSetupType,
+                                              match,
                                             )}
                                           </td>
                                           <td className="px-2 py-2 hidden sm:table-cell">

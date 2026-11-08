@@ -7,6 +7,7 @@ import { formatEntryName, formatEntryVersus } from "@/lib/entry-name";
 import { formatMatchScheduleDisplay } from "@/lib/match-schedule";
 import {
   formatMatchScoreDisplay,
+  getMatchStandingContribution,
   isBestOfThreeSuperTiebreak,
 } from "@/lib/match-setup";
 import { prisma } from "@/lib/prisma";
@@ -91,24 +92,24 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
       const home = rows.get(match.homePlayerId);
       const away = rows.get(match.awayPlayerId);
       if (!home || !away) continue;
-      if (match.homeGames === null || match.awayGames === null) continue;
+
+      const contribution = getMatchStandingContribution(match, tournament.matchSetupType);
+      if (!contribution) continue;
 
       home.played += 1;
       away.played += 1;
-      home.gamesWon += match.homeGames;
-      home.gamesLost += match.awayGames;
-      away.gamesWon += match.awayGames;
-      away.gamesLost += match.homeGames;
+      home.gamesWon += contribution.homeGamesForStandings;
+      home.gamesLost += contribution.awayGamesForStandings;
+      away.gamesWon += contribution.awayGamesForStandings;
+      away.gamesLost += contribution.homeGamesForStandings;
 
-      if (tournament.standingsUseGamePoints) {
-        home.gamePoints += match.homeGames;
-        away.gamePoints += match.awayGames;
-      }
+      home.gamePoints += contribution.homePoints;
+      away.gamePoints += contribution.awayPoints;
 
-      if (match.homeGames > match.awayGames) {
+      if (contribution.homeWon) {
         home.wins += 1;
         away.losses += 1;
-      } else if (match.awayGames > match.homeGames) {
+      } else if (contribution.awayWon) {
         away.wins += 1;
         home.losses += 1;
       }
@@ -244,20 +245,12 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                               </div>
                               <div className="mt-3 grid grid-cols-4 gap-2 text-[11px]">
                                 <p><span className="text-zinc-500 dark:text-zinc-400">P</span> {row.played}</p>
-                                <p><span className="text-zinc-500 dark:text-zinc-400">W</span> {row.wins}</p>
-                                <p><span className="text-zinc-500 dark:text-zinc-400">L</span> {row.losses}</p>
                                 <p><span className="text-zinc-500 dark:text-zinc-400">GW</span> {row.gamesWon}</p>
                                 <p><span className="text-zinc-500 dark:text-zinc-400">GL</span> {row.gamesLost}</p>
                                 <p>
-                                  <span className="text-zinc-500 dark:text-zinc-400">Diff</span>{" "}
-                                  {row.gamesWon - row.gamesLost}
+                                  <span className="text-zinc-500 dark:text-zinc-400">Set Points</span>{" "}
+                                  {row.gamePoints}
                                 </p>
-                                {tournament.standingsUseGamePoints && (
-                                  <p className="col-span-2">
-                                    <span className="text-zinc-500 dark:text-zinc-400">Game Points</span>{" "}
-                                    {row.gamePoints}
-                                  </p>
-                                )}
                               </div>
                             </article>
                           ))}
@@ -270,16 +263,9 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                 <th className="px-2 py-2">#</th>
                                 <th className="px-2 py-2">{isDoubles ? "Pair" : "Player"}</th>
                                 <th className="px-2 py-2">P</th>
-                                <th className="px-2 py-2">W</th>
-                                <th className="px-2 py-2">L</th>
-                                    <th className="px-2 py-2">{useSetsScoring ? "SW" : "GW"}</th>
-                                    <th className="px-2 py-2">{useSetsScoring ? "SL" : "GL"}</th>
-                                    <th className="px-2 py-2">Diff</th>
-                                    {tournament.standingsUseGamePoints && (
-                                      <th className="px-2 py-2">
-                                        {useSetsScoring ? "Set Points" : "Game Points"}
-                                      </th>
-                                    )}
+                                <th className="px-2 py-2">GW</th>
+                                <th className="px-2 py-2">GL</th>
+                                <th className="px-2 py-2">Set Points</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -291,14 +277,9 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                   <td className="px-2 py-2">{index + 1}</td>
                                   <td className="px-2 py-2">{row.playerName}</td>
                                   <td className="px-2 py-2">{row.played}</td>
-                                  <td className="px-2 py-2">{row.wins}</td>
-                                  <td className="px-2 py-2">{row.losses}</td>
                                   <td className="px-2 py-2">{row.gamesWon}</td>
                                   <td className="px-2 py-2">{row.gamesLost}</td>
-                                  <td className="px-2 py-2">{row.gamesWon - row.gamesLost}</td>
-                                  {tournament.standingsUseGamePoints && (
-                                    <td className="px-2 py-2">{row.gamePoints}</td>
-                                  )}
+                                  <td className="px-2 py-2">{row.gamePoints}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -334,6 +315,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                         match.homeGames,
                                         match.awayGames,
                                         tournament.matchSetupType,
+                                        match,
                                       )}
                                     </p>
                                     <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
@@ -383,6 +365,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                           match.homeGames,
                                           match.awayGames,
                                           tournament.matchSetupType,
+                                          match,
                                         )}
                                       </td>
                                       <td className="px-2 py-2">
@@ -441,6 +424,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                             match.homeGames,
                             match.awayGames,
                             tournament.matchSetupType,
+                            match,
                           )}
                         </p>
                         <p className="mt-1 text-[11px] text-zinc-600 dark:text-zinc-300">
@@ -488,6 +472,7 @@ export default async function TournamentPublicPage({ params, searchParams }: Pag
                                 match.homeGames,
                                 match.awayGames,
                                 tournament.matchSetupType,
+                                match,
                               )}
                             </td>
                             <td className="px-2 py-2">

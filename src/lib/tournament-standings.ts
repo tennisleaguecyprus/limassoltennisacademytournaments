@@ -1,6 +1,7 @@
-import { EventType } from "@prisma/client";
+import { EventType, MatchSetupType } from "@prisma/client";
 
 import { formatEntryName } from "@/lib/entry-name";
+import { getMatchStandingContribution } from "@/lib/match-setup";
 
 export type StandingRow = {
   playerId: string;
@@ -16,6 +17,7 @@ export type StandingRow = {
 type TournamentForStandings = {
   eventType: EventType;
   standingsUseGamePoints: boolean;
+  matchSetupType: MatchSetupType;
   players: Array<{
     id: string;
     fullName: string;
@@ -27,6 +29,14 @@ type TournamentForStandings = {
     awayPlayerId: string;
     homeGames: number | null;
     awayGames: number | null;
+    homeSets?: number | null;
+    awaySets?: number | null;
+    set1HomeGames?: number | null;
+    set1AwayGames?: number | null;
+    set2HomeGames?: number | null;
+    set2AwayGames?: number | null;
+    set3HomeGames?: number | null;
+    set3AwayGames?: number | null;
     round: string;
   }>;
 };
@@ -42,6 +52,15 @@ export type StandingMatchResult = {
   awayPlayerId: string;
   homeGames: number | null;
   awayGames: number | null;
+  homeSets?: number | null;
+  awaySets?: number | null;
+  set1HomeGames?: number | null;
+  set1AwayGames?: number | null;
+  set2HomeGames?: number | null;
+  set2AwayGames?: number | null;
+  set3HomeGames?: number | null;
+  set3AwayGames?: number | null;
+  winnerId?: string | null;
 };
 
 function arePrimaryStatsEqual(
@@ -74,18 +93,23 @@ export function getHeadToHeadWinnerId(
   matches: StandingMatchResult[],
 ): string | null {
   for (const match of matches) {
-    if (match.homeGames === null || match.awayGames === null) {
-      continue;
-    }
-    if (match.homeGames === match.awayGames) {
-      continue;
-    }
-
     const isPair =
       (match.homePlayerId === playerAId && match.awayPlayerId === playerBId) ||
       (match.homePlayerId === playerBId && match.awayPlayerId === playerAId);
 
     if (!isPair) {
+      continue;
+    }
+
+    if (match.winnerId === playerAId || match.winnerId === playerBId) {
+      return match.winnerId;
+    }
+
+    if (match.homeSets != null && match.awaySets != null && match.homeSets !== match.awaySets) {
+      return match.homeSets > match.awaySets ? match.homePlayerId : match.awayPlayerId;
+    }
+
+    if (match.homeGames === null || match.awayGames === null || match.homeGames === match.awayGames) {
       continue;
     }
 
@@ -222,26 +246,26 @@ export function buildStandingsByGroup(tournament: TournamentForStandings) {
       if (!home || !away) {
         continue;
       }
-      if (match.homeGames === null || match.awayGames === null) {
+
+      const contribution = getMatchStandingContribution(match, tournament.matchSetupType);
+      if (!contribution) {
         continue;
       }
 
       home.played += 1;
       away.played += 1;
-      home.gamesWon += match.homeGames;
-      home.gamesLost += match.awayGames;
-      away.gamesWon += match.awayGames;
-      away.gamesLost += match.homeGames;
+      home.gamesWon += contribution.homeGamesForStandings;
+      home.gamesLost += contribution.awayGamesForStandings;
+      away.gamesWon += contribution.awayGamesForStandings;
+      away.gamesLost += contribution.homeGamesForStandings;
 
-      if (tournament.standingsUseGamePoints) {
-        home.gamePoints += match.homeGames;
-        away.gamePoints += match.awayGames;
-      }
+      home.gamePoints += contribution.homePoints;
+      away.gamePoints += contribution.awayPoints;
 
-      if (match.homeGames > match.awayGames) {
+      if (contribution.homeWon) {
         home.wins += 1;
         away.losses += 1;
-      } else if (match.awayGames > match.homeGames) {
+      } else if (contribution.awayWon) {
         away.wins += 1;
         home.losses += 1;
       }
