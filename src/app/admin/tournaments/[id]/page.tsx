@@ -385,7 +385,7 @@ async function updateRoundRobinRules(formData: FormData) {
     !playersPerGroup ||
     !qualifiedPerGroup ||
     !numberOfSets ||
-    groupCount < 2 ||
+    groupCount < 1 ||
     playersPerGroup < 2 ||
     qualifiedPerGroup < 1 ||
     qualifiedPerGroup > playersPerGroup ||
@@ -1400,8 +1400,10 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                       knockout matches from those qualifiers.
                     </p>
                     <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-                      Knockout bracket supports 2, 4, or 8 qualifiers (final, two semifinals, or four
-                      quarterfinals). If you skip step 1, step 2 applies your rules automatically.
+                      Knockout bracket supports 2, 4, or 8 qualifiers. With 4 qualifiers (e.g. one
+                      group, top 4), semis are seeded <strong>1 vs 4</strong> and{" "}
+                      <strong>2 vs 3</strong>. If you skip step 1, step 2 applies your rules
+                      automatically.
                     </p>
                     {knockoutError && (
                       <p className="mt-2 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
@@ -1603,12 +1605,16 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                   <div className="sm:col-span-2">
                     <h3 className="text-base font-medium">Round Robin Qualification Rules</h3>
                   </div>
+                  <p className="sm:col-span-2 text-sm text-zinc-600 dark:text-zinc-300">
+                    Use <strong>1 group</strong> for a single round robin. Example: 1 group, qualify
+                    top 4 → knockout semis are <strong>1 vs 4</strong> and <strong>2 vs 3</strong>.
+                  </p>
                   <label className="flex flex-col gap-2">
                     <span className="text-sm text-zinc-700 dark:text-zinc-300">Number of groups</span>
                     <input
                       name="groupCount"
                       type="number"
-                      min={2}
+                      min={1}
                       defaultValue={tournament.groupCount ?? ""}
                       className="rounded-md border border-black/15 bg-transparent px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-zinc-500 dark:border-white/20"
                     />
@@ -1645,8 +1651,8 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                     />
                     <span>
                       {isDoubles
-                        ? "Qualify best second-place pairs across all groups"
-                        : "Qualify best second-place players across all groups"}
+                        ? "Qualify best second-place pairs across all groups (multi-group only)"
+                        : "Qualify best second-place players across all groups (multi-group only)"}
                     </span>
                   </label>
                   <label className="flex items-center gap-2 rounded-md border border-black/10 px-3 py-2 text-sm dark:border-white/20">
@@ -1657,8 +1663,8 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                     />
                     <span>
                       {isDoubles
-                        ? "Qualify best third-place pairs across all groups"
-                        : "Qualify best third-place players across all groups"}
+                        ? "Qualify best third-place pairs across all groups (multi-group only)"
+                        : "Qualify best third-place players across all groups (multi-group only)"}
                     </span>
                   </label>
                   <div className="sm:col-span-2 mt-2">
