@@ -3,6 +3,8 @@ import Link from "next/link";
 import AutoRefresh from "@/app/components/AutoRefresh";
 import { prisma } from "@/lib/prisma";
 
+export const dynamic = "force-dynamic";
+
 export default async function Home() {
   const tournaments = await prisma.tournament.findMany({
     orderBy: [{ startsAt: "asc" }],

@@ -338,6 +338,8 @@ async function updateTournament(formData: FormData) {
 
   revalidatePath(`/admin/tournaments/${id}`);
   revalidatePath("/admin");
+  revalidatePath("/");
+  revalidatePath(`/tournaments/${id}`);
 }
 
 async function updateRoundRobinRules(formData: FormData) {
@@ -413,6 +415,8 @@ async function updateRoundRobinRules(formData: FormData) {
 
   revalidatePath(`/admin/tournaments/${id}`);
   revalidatePath("/admin");
+  revalidatePath("/");
+  revalidatePath(`/tournaments/${id}`);
 }
 
 async function addPlayer(formData: FormData) {

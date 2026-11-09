@@ -57,6 +57,7 @@ async function createTournament(formData: FormData) {
   });
 
   revalidatePath("/admin");
+  revalidatePath("/");
 }
 
 async function deleteTournament(formData: FormData) {
