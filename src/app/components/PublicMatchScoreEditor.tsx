@@ -1,6 +1,6 @@
 import MatchResultForm from "@/app/components/MatchResultForm";
 import { formatMatchScoreDisplay } from "@/lib/match-setup";
-import { updateMatchResult } from "@/lib/match-result-actions";
+import { clearMatchScore, updateMatchResult } from "@/lib/match-result-actions";
 import type { MatchSetupType } from "@prisma/client";
 
 type PublicMatchScoreEditorProps = {
@@ -57,6 +57,7 @@ export default function PublicMatchScoreEditor({
         initialSet3HomeGames={match.set3HomeGames}
         initialSet3AwayGames={match.set3AwayGames}
         updateMatchResult={updateMatchResult}
+        clearMatchScore={clearMatchScore}
         scoresOnly
         compact
         submitLabel={hasScore ? "Update score" : "Enter score"}

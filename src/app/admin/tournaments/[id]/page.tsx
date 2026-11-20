@@ -17,7 +17,7 @@ import {
   parseMatchSetupType,
   resolveNumberOfSets,
 } from "@/lib/match-setup";
-import { updateMatchResult } from "@/lib/match-result-actions";
+import { clearMatchScore, updateMatchResult } from "@/lib/match-result-actions";
 import { isValidPhone, normalizePhone } from "@/lib/ladder";
 import { prisma } from "@/lib/prisma";
 import {
@@ -1286,6 +1286,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                 initialSet3HomeGames={match.set3HomeGames}
                                 initialSet3AwayGames={match.set3AwayGames}
                                 updateMatchResult={updateMatchResult}
+                                clearMatchScore={clearMatchScore}
                                 useSetsScoring={useSetsScoring}
                                 submitLabel="Save / Correct"
                               />
@@ -1459,6 +1460,7 @@ export default async function TournamentControlPage({ params, searchParams }: Pa
                                               initialSet3HomeGames={match.set3HomeGames}
                                               initialSet3AwayGames={match.set3AwayGames}
                                               updateMatchResult={updateMatchResult}
+                                              clearMatchScore={clearMatchScore}
                                               useSetsScoring={useSetsScoring}
                                               compact
                                               submitLabel="Save / Correct"

@@ -164,78 +164,127 @@ export async function updateMatchResult(formData: FormData) {
     },
   });
 
+  await syncKnockoutFinalFromSemis(tournamentId, matchId);
+
+  revalidatePath(`/admin/tournaments/${tournamentId}`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+const clearedScoreData = {
+  homeGames: null,
+  awayGames: null,
+  homeSets: null,
+  awaySets: null,
+  set1HomeGames: null,
+  set1AwayGames: null,
+  set2HomeGames: null,
+  set2AwayGames: null,
+  set3HomeGames: null,
+  set3AwayGames: null,
+  winnerId: null,
+};
+
+export async function clearMatchScore(formData: FormData) {
+  const matchId = String(formData.get("matchId") ?? "");
+  const tournamentId = String(formData.get("tournamentId") ?? "");
+  const homePlayerId = String(formData.get("homePlayerId") ?? "");
+  const awayPlayerId = String(formData.get("awayPlayerId") ?? "");
+
+  if (!matchId || !tournamentId || !homePlayerId || !awayPlayerId) {
+    return;
+  }
+
+  const existingMatch = await prisma.match.findUnique({
+    where: { id: matchId },
+    select: {
+      tournamentId: true,
+      homePlayerId: true,
+      awayPlayerId: true,
+    },
+  });
+
+  if (
+    !existingMatch ||
+    existingMatch.tournamentId !== tournamentId ||
+    existingMatch.homePlayerId !== homePlayerId ||
+    existingMatch.awayPlayerId !== awayPlayerId
+  ) {
+    return;
+  }
+
+  await prisma.match.update({
+    where: { id: matchId },
+    data: clearedScoreData,
+  });
+
+  await syncKnockoutFinalFromSemis(tournamentId, matchId);
+
+  revalidatePath(`/admin/tournaments/${tournamentId}`);
+  revalidatePath(`/tournaments/${tournamentId}`);
+}
+
+async function syncKnockoutFinalFromSemis(tournamentId: string, matchId: string) {
   const updatedMatch = await prisma.match.findUnique({
     where: { id: matchId },
     select: { round: true },
   });
 
-  if (updatedMatch?.round === "Knockout SF1" || updatedMatch?.round === "Knockout SF2") {
-    const sfMatches = await prisma.match.findMany({
-      where: {
-        tournamentId,
-        round: {
-          in: ["Knockout SF1", "Knockout SF2"],
-        },
-      },
-      select: {
-        round: true,
-        winnerId: true,
-      },
-    });
+  if (updatedMatch?.round !== "Knockout SF1" && updatedMatch?.round !== "Knockout SF2") {
+    return;
+  }
 
-    const sf1 = sfMatches.find((m) => m.round === "Knockout SF1");
-    const sf2 = sfMatches.find((m) => m.round === "Knockout SF2");
-
-    const finalMatch = await prisma.match.findFirst({
-      where: {
-        tournamentId,
-        round: "Knockout Final",
+  const sfMatches = await prisma.match.findMany({
+    where: {
+      tournamentId,
+      round: {
+        in: ["Knockout SF1", "Knockout SF2"],
       },
-      select: { id: true, homePlayerId: true, awayPlayerId: true },
-    });
+    },
+    select: {
+      round: true,
+      winnerId: true,
+    },
+  });
 
-    if (sf1?.winnerId && sf2?.winnerId && sf1.winnerId !== sf2.winnerId) {
-      if (finalMatch) {
-        const finalistsChanged =
-          finalMatch.homePlayerId !== sf1.winnerId || finalMatch.awayPlayerId !== sf2.winnerId;
-        if (finalistsChanged) {
-          await prisma.match.update({
-            where: { id: finalMatch.id },
-            data: {
-              homePlayerId: sf1.winnerId,
-              awayPlayerId: sf2.winnerId,
-              winnerId: null,
-              homeGames: null,
-              awayGames: null,
-              homeSets: null,
-              awaySets: null,
-              set1HomeGames: null,
-              set1AwayGames: null,
-              set2HomeGames: null,
-              set2AwayGames: null,
-              set3HomeGames: null,
-              set3AwayGames: null,
-              scheduledAt: null,
-            },
-          });
-        }
-      } else {
-        await prisma.match.create({
+  const sf1 = sfMatches.find((m) => m.round === "Knockout SF1");
+  const sf2 = sfMatches.find((m) => m.round === "Knockout SF2");
+
+  const finalMatch = await prisma.match.findFirst({
+    where: {
+      tournamentId,
+      round: "Knockout Final",
+    },
+    select: { id: true, homePlayerId: true, awayPlayerId: true },
+  });
+
+  if (sf1?.winnerId && sf2?.winnerId && sf1.winnerId !== sf2.winnerId) {
+    if (finalMatch) {
+      const finalistsChanged =
+        finalMatch.homePlayerId !== sf1.winnerId || finalMatch.awayPlayerId !== sf2.winnerId;
+      if (finalistsChanged) {
+        await prisma.match.update({
+          where: { id: finalMatch.id },
           data: {
-            tournamentId,
-            round: "Knockout Final",
             homePlayerId: sf1.winnerId,
             awayPlayerId: sf2.winnerId,
+            ...clearedScoreData,
+            scheduledAt: null,
           },
         });
       }
-    } else if (finalMatch) {
-      await prisma.match.delete({
-        where: { id: finalMatch.id },
+    } else {
+      await prisma.match.create({
+        data: {
+          tournamentId,
+          round: "Knockout Final",
+          homePlayerId: sf1.winnerId,
+          awayPlayerId: sf2.winnerId,
+        },
       });
     }
+  } else if (finalMatch) {
+    await prisma.match.delete({
+      where: { id: finalMatch.id },
+    });
   }
-
-  revalidatePath(`/admin/tournaments/${tournamentId}`);
-  revalidatePath(`/tournaments/${tournamentId}`);
 }
